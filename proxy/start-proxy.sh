@@ -15,4 +15,4 @@ fi
 
 export ANTHROPIC_API_KEY="$(tr -d '[:space:]' < "$KEY_FILE")"
 echo "Key geladen aus $KEY_FILE ($(wc -c < "$KEY_FILE") Bytes)."
-exec python3 "$(dirname "$0")/claude_translate_proxy.py"
+exec python3 -u "$(dirname "$0")/claude_translate_proxy.py"

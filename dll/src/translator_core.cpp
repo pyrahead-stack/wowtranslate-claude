@@ -183,9 +183,11 @@ bool TranslationClient::Initialize(const string& key) {
     LOG_INFO("Initializing translation client");
     LOG_INFO("Server: " + GetServerInfo());
 
-    // Initialize WinHTTP
+    // Initialize WinHTTP.
+    // NO_PROXY: direkte Verbindung zum lokalen Proxy. Unter Wine haengt
+    // DEFAULT_PROXY in der Proxy-Autoerkennung (WPAD) und laeuft in 30s-Timeout.
     hSession = WinHttpOpen(L"WoWTranslate/0.2",
-                          WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                          WINHTTP_ACCESS_TYPE_NO_PROXY,
                           WINHTTP_NO_PROXY_NAME,
                           WINHTTP_NO_PROXY_BYPASS,
                           0);
@@ -194,6 +196,10 @@ bool TranslationClient::Initialize(const string& key) {
         LOG_ERROR("Failed to initialize WinHTTP session");
         return false;
     }
+
+    // Kurze Timeouts: bei Verbindungsproblemen schnell scheitern statt 30s haengen.
+    // (resolve, connect, send, receive) in ms.
+    WinHttpSetTimeouts(hSession, 5000, 5000, 10000, 15000);
 
     // Convert host to wide string
     wstring wHost;
