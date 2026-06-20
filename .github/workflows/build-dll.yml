@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
     - name: Checkout code
@@ -24,25 +24,10 @@ jobs:
 
     - name: Configure CMake
       working-directory: dll
-      shell: pwsh
       run: |
-        cmake --version *> ${{ github.workspace }}/configure.log
         mkdir build
         cd build
-        cmake .. -G "Visual Studio 17 2022" -A Win32 *>> ${{ github.workspace }}/configure.log
-        $code = $LASTEXITCODE
-        Get-Content ${{ github.workspace }}/configure.log
-        exit $code
-
-    - name: Capture configure log on failure
-      if: failure()
-      shell: bash
-      run: |
-        git config user.name "ci"
-        git config user.email "ci@local"
-        git add -f configure.log
-        git commit -m "ci: configure log [skip ci]"
-        git push origin HEAD:main
+        cmake .. -G "Visual Studio 17 2022" -A Win32
 
     - name: Build DLL
       working-directory: dll/build
