@@ -72,3 +72,5 @@ install(TARGETS WoWTranslate
     RUNTIME DESTINATION bin
     LIBRARY DESTINATION lib
 )
+
+# Build via GitHub Actions (build.yml) – Win32/MSVC
