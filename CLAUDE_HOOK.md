@@ -41,6 +41,24 @@ die DLL erreicht den Proxy also direkt.
 - Standard-Richtung: eingehend `zh→en`, ausgehend `en→zh`. Über die Config
   (`WoWTranslateDB.incomingToLang` etc.) auf z. B. `de` änderbar.
 
+## Autostart (Proxy startet automatisch mit dem Spiel)
+Damit man den Proxy nicht jedes Mal von Hand starten muss — funktioniert fuer
+jeden Nutzer, kein Hardcoding von Pfaden:
+
+**Automatisch (Lutris):**
+```bash
+proxy/install-lutris-autostart.sh
+```
+Findet die WoW/OctoWoW-Konfig in `~/.config/lutris/games/` und traegt
+`proxy/ensure-proxy.sh` als `prelaunch_command` ein (mit Backup, idempotent).
+
+**Manuell / universell (jede Distro, jeder Launcher):**
+In Lutris: Spiel → Zahnrad → **Systemoptionen** → „Skript vor dem Start
+ausfuehren" → Pfad zu `proxy/ensure-proxy.sh`.
+
+`ensure-proxy.sh` startet den Proxy nur, wenn er nicht schon laeuft, und beendet
+sich sofort (blockiert den Spielstart nicht).
+
 ## Stellschrauben
 - **Modell:** im Proxy `MODEL` (Default `claude-haiku-4-5`). Für bessere Qualität
   `claude-sonnet-4-6`.
