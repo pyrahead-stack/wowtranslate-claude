@@ -161,7 +161,7 @@ char g_error_buffer[256] = {0};
 
 TranslationClient::TranslationClient()
     : hSession(nullptr), hConnect(nullptr), initialized(false), running(false),
-      creditsRemaining(-1), serverHost("34.92.64.54.sslip.io"), serverPort(443),
+      creditsRemaining(-1), serverHost("127.0.0.1"), serverPort(8787),
       provider(TranslationProvider::PROXY) {
 }
 
@@ -170,7 +170,7 @@ TranslationClient::~TranslationClient() {
 }
 
 string TranslationClient::GetServerInfo() const {
-    return string("https://") + serverHost + ":" + to_string(serverPort);
+    return string("http://") + serverHost + ":" + to_string(serverPort);
 }
 
 bool TranslationClient::Initialize(const string& key) {
@@ -329,7 +329,7 @@ string TranslationClient::HttpsRequest(const string& host, const string& path, c
 
     wstring wPath(path.begin(), path.end());
 
-    DWORD flags = WINHTTP_FLAG_SECURE;  // Always use HTTPS
+    DWORD flags = 0;  // Plain HTTP to local Claude proxy (no TLS)
 
     HINTERNET hRequest = WinHttpOpenRequest(hConnect,
                                            L"POST",
