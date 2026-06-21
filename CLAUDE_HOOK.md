@@ -64,6 +64,19 @@ sich sofort (blockiert den Spielstart nicht).
   `claude-sonnet-4-6`.
 - **Port:** muss in DLL (`serverPort`) und Proxy (`LISTEN_PORT`) identisch sein.
 
+## Cache, Glossar, Retry (Proxy-Features)
+- **Persistenter Cache:** `proxy/translation-cache.json` (neben dem Skript, per
+  `.gitignore` ausgeschlossen). Bereits übersetzte Zeilen sind danach über alle
+  Chars/Neustarts hinweg sofort & kostenlos. Datei einfach löschen zum Leeren.
+- **WoW-Glossar:** eingebaute Begriffsliste (Boss-/Raid-/Slang-Namen) sorgt für
+  korrekte Übersetzungen (`老克 → Kel'Thuzad` statt „Old gram"). Nur Begriffe,
+  die im Text vorkommen, landen im Prompt → kaum Token-Kosten. Erweiterbar über
+  `proxy/glossary.json` (`{"begriff": "übersetzung"}`, wird über die Defaults
+  gemerged).
+- **Retry:** bei Overload/Rate-Limit/Netzwerkblip (429/500/503/529) wiederholt der
+  Proxy automatisch (2×, Backoff 1s→2s). Echte Fehler (z. B. 400/401) werden
+  sofort weitergereicht.
+
 ## Bekannte Stolpersteine
 - **`UnitXP` fehlt** → SuperWoW nicht geladen. Ohne das geht gar nichts.
 - **Encoding:** Turtle-WoW & Co. nutzen UTF-8 (passt). Sollte der Server eine

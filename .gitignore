@@ -31,3 +31,7 @@ release/
 
 # WoW SavedVariables (for testing)
 WTF/
+
+# Proxy translation cache (local, per-user)
+proxy/translation-cache.json
+proxy/translation-cache.json.tmp
