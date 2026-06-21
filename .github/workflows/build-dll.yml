@@ -38,15 +38,17 @@ jobs:
         mkdir WoWTranslate
         copy dll\build\bin\Release\WoWTranslate.dll WoWTranslate\
         xcopy Interface\AddOns\WoWTranslate WoWTranslate\Interface\AddOns\WoWTranslate\ /E /I /Q
+        xcopy proxy WoWTranslate\proxy\ /E /I /Q
         echo WoWTranslate Installation> WoWTranslate\INSTALL.txt
         echo =========================>> WoWTranslate\INSTALL.txt
         echo.>> WoWTranslate\INSTALL.txt
         echo 1. Copy WoWTranslate.dll to your WoW folder (next to WoW.exe)>> WoWTranslate\INSTALL.txt
         echo 2. Add "WoWTranslate.dll" to dlls.txt in your WoW folder>> WoWTranslate\INSTALL.txt
         echo 3. Copy the Interface folder to your WoW folder>> WoWTranslate\INSTALL.txt
-        echo 4. Launch WoW, then type: /wt key YOUR_API_KEY>> WoWTranslate\INSTALL.txt
+        echo 4. Run the proxy: python3 proxy/claude_translate_proxy.py (needs ANTHROPIC_API_KEY)>> WoWTranslate\INSTALL.txt
+        echo 5. Launch WoW, then type: /wt key x  and  /wt show>> WoWTranslate\INSTALL.txt
         echo.>> WoWTranslate\INSTALL.txt
-        echo For help: /wt show>> WoWTranslate\INSTALL.txt
+        echo See README for getting an API key.>> WoWTranslate\INSTALL.txt
       shell: cmd
 
     - name: Upload Package
