@@ -41,6 +41,27 @@ local DEFAULT_PREFIX = "[Translated by WoWTranslate]"
 -- Incoming channel detection state
 local currentIncomingChannel = nil
 local currentIsSystemEvent = false  -- True for system/emote/NPC events
+local currentIncomingSender = nil   -- whisper author (arg2) while an event is handled
+
+-- Per-person language memory for whispers: playerName -> detected source code.
+-- Lets us reply to a whisper in the language that person used.
+local whisperLang = {}
+
+-- Extract a leading [[xx]] source-language marker (added by the proxy/Claude).
+-- Returns langCode (lowercased, or nil) and the text with the marker removed.
+local function ExtractLangMarker(text)
+    if not text then return nil, text end
+    local _, _, code, rest = string.find(text, "^%s*%[%[(%a%a%a?)%]%]%s*(.*)$")
+    if code then return string.lower(code), rest end
+    return nil, text
+end
+
+-- Map an ISO source code to the short display tag the user sees, e.g. zh -> CN.
+local LANG_DISPLAY_TAG = { zh = "CN", ja = "JP", ko = "KR" }
+local function LangTag(code)
+    if not code then return nil end
+    return LANG_DISPLAY_TAG[code] or string.upper(code)
+end
 
 local EVENT_TO_CHANNEL = {
     CHAT_MSG_SAY = "SAY",
@@ -108,8 +129,11 @@ local defaults = {
     disableWhileAfk = true,
     translateSystemMessages = false,  -- Don't translate system msgs, emotes, NPC speech
     -- Language settings (any-to-any translation)
-    incomingFromLang = "zh",
+    -- incomingToLang = the language EVERYTHING foreign is translated into (your main).
+    -- understoodLangs = languages you already read -> left untranslated.
+    incomingFromLang = "auto",
     incomingToLang = "en",
+    understoodLangs = { en = true },
     outgoingFromLang = "en",
     outgoingToLang = "zh",
 }
@@ -221,8 +245,16 @@ end
 -- Check if text contains characters that need translation based on incoming settings
 local function ContainsSourceLanguage(text)
     if not text then return false end
-    local sourceLang = WoWTranslateDB and WoWTranslateDB.incomingFromLang or "zh"
-    return ContainsLanguageChars(text, sourceLang)
+    -- Source is auto-detected; translate anything that has at least one real LETTER
+    -- (ASCII a-z/A-Z or any non-ASCII script byte). Pure numbers, punctuation,
+    -- symbols or a lone backslash are NOT sent -> avoids degenerate API calls.
+    for i = 1, string.len(text) do
+        local b = string.byte(text, i)
+        if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b >= 192 then
+            return true
+        end
+    end
+    return false
 end
 
 -- Check if text contains outgoing target language (to prevent double-translation)
@@ -723,13 +755,17 @@ local function HookChatFrames()
                     return
                 end
 
-                -- Check incoming channel filter
-                if currentIncomingChannel then
-                    local inChannels = WoWTranslateDB.incomingChannels
-                    if inChannels and not inChannels[currentIncomingChannel] then
-                        frameOriginalAddMessage(self, text, r, g, b, id, holdTime)
-                        return
-                    end
+                -- Only translate REAL incoming chat: a chat event must have set the
+                -- channel. Otherwise this AddMessage is addon/UI output (e.g. our own
+                -- "[WoWTranslate] Settings saved!") -> pass it through untouched.
+                if not currentIncomingChannel then
+                    frameOriginalAddMessage(self, text, r, g, b, id, holdTime)
+                    return
+                end
+                local inChannels = WoWTranslateDB.incomingChannels
+                if inChannels and not inChannels[currentIncomingChannel] then
+                    frameOriginalAddMessage(self, text, r, g, b, id, holdTime)
+                    return
                 end
 
                 -- Skip system messages, emotes, NPC speech
@@ -786,12 +822,20 @@ local function HookChatFrames()
                     return
                 end
 
-                -- Check if credits are exhausted FIRST - if so, pass through original text
-                -- This skips both cache and API to show untranslated text
+                -- Budget reached -> OFFLINE MODE: no API calls, but still reuse a
+                -- stored translation if we have one (the cache is our offline DB).
+                -- Cache hit shows the translation; a miss shows the original.
                 if WoWTranslate_API and WoWTranslate_API.IsCreditsExhausted() then
-                    DebugLog("Credits exhausted, passing through original (no cache, no API)")
-                    WoWTranslate_API.ShowCreditWarningIfNeeded()
-                    frameOriginalAddMessage(self, text, r, g, b, id, holdTime)
+                    local cachedOffline = WoWTranslate_CacheGet(text)
+                    if cachedOffline then
+                        DebugLog("Offline: cache hit")
+                        WoWTranslate_API.TrackCacheHit(string.len(text))
+                        frameOriginalAddMessage(self, cachedOffline, r, g, b, id, holdTime)
+                    else
+                        DebugLog("Offline: no cached translation, passing through original")
+                        WoWTranslate_API.ShowCreditWarningIfNeeded()
+                        frameOriginalAddMessage(self, text, r, g, b, id, holdTime)
+                    end
                     return
                 end
 
@@ -819,6 +863,7 @@ local function HookChatFrames()
                         originalAddMessage = frameOriginalAddMessage,
                         originalText = text,
                         segments = segments,
+                        sender = currentIncomingSender,  -- whisper author (or nil)
                         r = r,
                         g = g,
                         b = b,
@@ -837,16 +882,33 @@ local function HookChatFrames()
                             if translation then
                                 DebugLog("API returned:", string.sub(translation, 1, 50))
 
-                                -- Reconstruct with original hyperlinks
-                                local finalText = ReconstructMessage(pending.segments, translation)
+                                -- Pull off the [[xx]] source-language marker first.
+                                local lang, body = ExtractLangMarker(translation)
 
-                                DebugLog("Final:", string.sub(finalText, 1, 100))
+                                -- Remember the language for this whisper partner so we
+                                -- can reply in it (auto-reply feature).
+                                if lang and pending.sender then
+                                    whisperLang[pending.sender] = lang
+                                end
 
-                                -- Debug: Check if links still have proper structure
-                                if string.find(finalText, "|H") and string.find(finalText, "|h") then
-                                    DebugLog("Final has |H and |h markers - link structure OK")
-                                else
-                                    DebugLog("WARNING: Final missing link markers!")
+                                -- Backstop: if the user understands this language, show
+                                -- the ORIGINAL untranslated (the proxy may have translated
+                                -- it anyway when its quick detector was unsure).
+                                if lang and WoWTranslateDB.understoodLangs
+                                   and WoWTranslateDB.understoodLangs[lang] then
+                                    pending.originalAddMessage(pending.frame, pending.originalText, pending.r, pending.g, pending.b, pending.id, pending.holdTime)
+                                    return
+                                end
+
+                                -- Reconstruct with original hyperlinks (marker removed)
+                                local finalText = ReconstructMessage(pending.segments, body)
+
+                                -- Prepend the language tag (e.g. "[DE] ") unless disabled.
+                                -- Skip the tag when the source is already our read language
+                                -- (no point tagging English with [EN] when you read English).
+                                local readLang = (WoWTranslateDB and WoWTranslateDB.incomingToLang) or "en"
+                                if lang and lang ~= readLang and WoWTranslateDB and WoWTranslateDB.showLangTag ~= false then
+                                    finalText = "|cff9d9d9d[" .. LangTag(lang) .. "]|r " .. finalText
                                 end
 
                                 WoWTranslate_CacheSave(pending.originalText, finalText)
@@ -962,9 +1024,31 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
         return originalSendChatMessage(msg, chatType, language, channel)
     end
 
-    -- Skip if credits are exhausted
+    -- Whisper auto-reply: if we know which language this whisper partner used,
+    -- reply in THAT language instead of the global outgoing target.
+    local toOverride = nil
+    if chatType == "WHISPER" and channel and whisperLang[channel] then
+        toOverride = whisperLang[channel]
+        DebugLog("Whisper auto-reply lang for", channel, "=", toOverride)
+    end
+    local effectiveTo = toOverride or (WoWTranslateDB and WoWTranslateDB.outgoingToLang) or "zh"
+
+    -- Budget reached -> OFFLINE MODE: send a stored translation if we have one for
+    -- this exact message, otherwise send the original. No API calls.
     if WoWTranslate_API.IsCreditsExhausted() then
-        DebugLog("Credits exhausted, sending original")
+        local cachedOut = WoWTranslate_CacheGet(msg)
+        if cachedOut then
+            local userPrefix = WoWTranslateDB.outgoingPrefix or DEFAULT_PREFIX
+            local prefix = userPrefix
+            if userPrefix == DEFAULT_PREFIX then
+                prefix = TRANSLATED_PREFIXES[effectiveTo] or userPrefix
+            end
+            local finalMsg = prefix .. " " .. cachedOut
+            if string.len(finalMsg) > 255 then finalMsg = string.sub(finalMsg, 1, 252) .. "..." end
+            DebugLog("Offline: outgoing cache hit")
+            return originalSendChatMessage(finalMsg, chatType, language, channel)
+        end
+        DebugLog("Offline: no cached outgoing translation, sending original")
         WoWTranslate_API.ShowCreditWarningIfNeeded()
         return originalSendChatMessage(msg, chatType, language, channel)
     end
@@ -987,6 +1071,7 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
         chatType = chatType,
         language = language,
         channel = channel,
+        toLang = effectiveTo,  -- target language for prefix (whisper-aware)
         timestamp = GetTime()
     }
 
@@ -997,7 +1082,8 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
 
     DebugLog("Outgoing queued:", queueId, msg)
 
-    -- Request translation (send only the text portions, not hyperlinks)
+    -- Request translation (send only the text portions, not hyperlinks).
+    -- Pass the whisper-aware target so a reply goes out in the partner's language.
     WoWTranslate_API.TranslateOutgoing(textToTranslate, function(translation, err)
         local queued = outgoingQueue[queueId]
         if not queued then
@@ -1009,16 +1095,18 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
         if translation then
             DebugLog("Outgoing translation received:", translation)
 
+            -- Strip the [[xx]] source marker (we never tag our own outgoing text).
+            local _, body = ExtractLangMarker(translation)
+
             -- Reconstruct message with original hyperlinks
-            local reconstructed = ReconstructMessage(queued.segments, translation)
+            local reconstructed = ReconstructMessage(queued.segments, body)
             DebugLog("Outgoing reconstructed:", reconstructed)
 
             -- Build message with prefix (use pre-translated for default prefix)
             local userPrefix = WoWTranslateDB.outgoingPrefix or DEFAULT_PREFIX
             local prefix
             if userPrefix == DEFAULT_PREFIX then
-                local targetLang = WoWTranslateDB.outgoingToLang or "zh"
-                prefix = TRANSLATED_PREFIXES[targetLang] or userPrefix
+                prefix = TRANSLATED_PREFIXES[queued.toLang or "zh"] or userPrefix
             else
                 prefix = userPrefix
             end
@@ -1031,6 +1119,9 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
 
             originalSendChatMessage(finalMsg, queued.chatType, queued.language, queued.channel)
 
+            -- Store in the offline DB (typed text -> translation) for budget-empty reuse.
+            WoWTranslate_CacheSave(queued.originalMsg, reconstructed)
+
             if originalAddMessage then
                 originalAddMessage(DEFAULT_CHAT_FRAME, "|cFF00FF00[WoWTranslate] Sent:|r " .. finalMsg)
             end
@@ -1042,7 +1133,7 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
             end
             originalSendChatMessage(queued.originalMsg, queued.chatType, queued.language, queued.channel)
         end
-    end)
+    end, toOverride)
 end
 
 -- Track if hook is installed (for diagnostics)
@@ -1208,12 +1299,27 @@ SlashCmdList["WOWTRANSLATE"] = function(msg)
         DEFAULT_CHAT_FRAME:AddMessage("[WoWTranslate] Requesting from API...")
         WoWTranslate_API.Translate(testText, function(result, err)
             if result then
-                DEFAULT_CHAT_FRAME:AddMessage("[WoWTranslate] API result: " .. result)
-                WoWTranslate_CacheSave(testText, result)
+                local lang, body = ExtractLangMarker(result)
+                local shown = body
+                if lang then shown = "[" .. LangTag(lang) .. "] " .. body end
+                DEFAULT_CHAT_FRAME:AddMessage("[WoWTranslate] API result: " .. shown)
+                WoWTranslate_CacheSave(testText, shown)
             else
                 DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[WoWTranslate] API error: " .. (err or "unknown") .. "|r")
             end
         end)
+
+    elseif cmd == "tag" then
+        if arg == "off" or arg == "disable" then
+            WoWTranslateDB.showLangTag = false
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFFFFF00[WoWTranslate] Language tag OFF|r")
+        elseif arg == "on" or arg == "enable" then
+            WoWTranslateDB.showLangTag = true
+            DEFAULT_CHAT_FRAME:AddMessage("|cFF00FF00[WoWTranslate] Language tag ON (e.g. [DE])|r")
+        else
+            local state = (WoWTranslateDB.showLangTag ~= false) and "ON" or "OFF"
+            DEFAULT_CHAT_FRAME:AddMessage("[WoWTranslate] Language tag is " .. state .. ". Use /wt tag on|off")
+        end
 
     elseif cmd == "clearcache" then
         WoWTranslate_CacheClear()
@@ -1455,7 +1561,7 @@ local function OnAddonLoaded()
     local cacheCount = WoWTranslate_CacheStats().entries
     local dllStatus = dllOk and "|cFF00FF00DLL OK|r" or "|cFFFFFF00DLL not loaded|r"
 
-    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFFWoWTranslate|r v0.12 - " .. dllStatus .. " | /wt show")
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF00CCFFWoWTranslate|r v0.13 - " .. dllStatus .. " | /wt show")
 end
 
 local function OnPlayerLogin()
@@ -1466,9 +1572,12 @@ local function OnPlayerLogin()
     ChatFrame_OnEvent = function(event)
         currentIncomingChannel = EVENT_TO_CHANNEL[event]
         currentIsSystemEvent = SYSTEM_EVENTS[event] or false
+        -- For whispers, arg2 holds the author; remember it for per-person reply lang.
+        currentIncomingSender = (event == "CHAT_MSG_WHISPER") and arg2 or nil
         originalChatFrameOnEvent(event)
         currentIncomingChannel = nil
         currentIsSystemEvent = false
+        currentIncomingSender = nil
     end
 
     if not WoWTranslate_API.IsAvailable() then
@@ -1549,11 +1658,19 @@ local function ProcessItemCacheMessage(queued)
         return
     end
 
-    -- Check if credits are exhausted FIRST - if so, pass through original (no cache, no API)
+    -- Budget reached -> OFFLINE MODE: reuse a stored translation if available,
+    -- otherwise show the original. No API calls.
     if WoWTranslate_API and WoWTranslate_API.IsCreditsExhausted() then
-        DebugLog("Credits exhausted, passing through item message (no cache, no API)")
-        WoWTranslate_API.ShowCreditWarningIfNeeded()
-        queued.originalAddMessage(queued.frame, text, queued.r, queued.g, queued.b, queued.id, queued.holdTime)
+        local cachedOffline = WoWTranslate_CacheGet(text)
+        if cachedOffline then
+            DebugLog("Offline: cache hit for item message")
+            WoWTranslate_API.TrackCacheHit(string.len(text))
+            queued.originalAddMessage(queued.frame, cachedOffline, queued.r, queued.g, queued.b, queued.id, queued.holdTime)
+        else
+            DebugLog("Offline: no cached item translation, passing through original")
+            WoWTranslate_API.ShowCreditWarningIfNeeded()
+            queued.originalAddMessage(queued.frame, text, queued.r, queued.g, queued.b, queued.id, queued.holdTime)
+        end
         return
     end
 
@@ -1596,7 +1713,12 @@ local function ProcessItemCacheMessage(queued)
 
                 if translation then
                     DebugLog("API returned for item msg:", string.sub(translation, 1, 50))
-                    local finalText = ReconstructMessage(pending.segments, translation)
+                    local lang, body = ExtractLangMarker(translation)
+                    local finalText = ReconstructMessage(pending.segments, body)
+                    local readLang = (WoWTranslateDB and WoWTranslateDB.incomingToLang) or "en"
+                    if lang and lang ~= readLang and WoWTranslateDB and WoWTranslateDB.showLangTag ~= false then
+                        finalText = "|cff9d9d9d[" .. LangTag(lang) .. "]|r " .. finalText
+                    end
                     WoWTranslate_CacheSave(pending.originalText, finalText)
                     pending.originalAddMessage(pending.frame, finalText, pending.r, pending.g, pending.b, pending.id, pending.holdTime)
                 else

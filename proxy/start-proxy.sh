@@ -15,4 +15,12 @@ fi
 
 export ANTHROPIC_API_KEY="$(tr -d '[:space:]' < "$KEY_FILE")"
 echo "Key geladen aus $KEY_FILE ($(wc -c < "$KEY_FILE") Bytes)."
+
+# Optionales Monatslimit (USD): WT_BUDGET oder Datei ~/.config/wowtranslate/budget.
+# Gesetzt -> Uebersetzung stoppt beim Limit, Config-Fenster zeigt "Budget -> $x left".
+# Ohne Limit = unbegrenzt (eigener Key).
+BUDGET_FILE="$HOME/.config/wowtranslate/budget"
+if [ -z "${WT_BUDGET:-}" ] && [ ! -s "$BUDGET_FILE" ]; then
+  echo "Hinweis: kein Monatslimit gesetzt (unbegrenzt). Optional:  echo 5 > $BUDGET_FILE"
+fi
 exec python3 -u "$(dirname "$0")/claude_translate_proxy.py"

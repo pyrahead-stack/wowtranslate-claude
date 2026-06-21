@@ -9,10 +9,18 @@ and your own Anthropic key.
 
 ## What it does
 
-- Translates **incoming** chat (e.g. Chinese → English) so you can read it.
-- **Outgoing** translation (your messages → another language) is optional and off by default.
-- Pay-per-use against your own API key — no subscription. Only new text is sent out;
-  repeats and lines already in your language are handled locally.
+- Translates **incoming** chat into your language — **any** source language is
+  auto-detected (Chinese, Russian, French, German, …). A small `[DE]`/`[CN]` tag shows
+  what the original was (toggle with `/wt tag off`).
+- **Multilingual?** Tick the languages you already read under **"Don't translate"** —
+  those are shown as-is; everything else is translated.
+- **Outgoing** translation (your messages → another language) is optional and off by
+  default. A reply to a whisper automatically goes out in the language that person used.
+- **Pay-per-use** against your own API key — no subscription. Set an optional monthly
+  **budget** (`~/.config/wowtranslate/budget`); once reached it stops calling the API and
+  serves translations from its offline cache.
+- Only new text is sent out; repeats, your own languages, and non-text (links/numbers)
+  are handled locally at no cost.
 
 ## Requirements
 

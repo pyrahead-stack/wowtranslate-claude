@@ -18,6 +18,15 @@ local creditsExhausted = false  -- True when we know credits are zero
 local lastError = nil
 local lastCreditWarningTime = 0  -- For throttling credit warnings
 
+-- Real spend / budget info (Claude backend, your own API key).
+-- Populated from the proxy's __WT_STATS__ sentinel response. -1 = unknown/unlimited.
+local spendUsd = -1     -- spent this month, USD (float)
+local spendCalls = -1   -- real Claude calls this month
+local spendInTok = 0
+local spendOutTok = 0
+local budgetUsd = -1    -- self-imposed monthly budget, -1 = unlimited
+local leftUsd = -1      -- budget remaining, -1 = unlimited
+
 -- Cache savings tracking (session-based)
 local sessionCacheHits = 0
 local sessionCacheChars = 0
@@ -120,7 +129,7 @@ function WoWTranslate_API.ShowCreditWarningIfNeeded()
     if now - lastCreditWarningTime >= 60 then
         lastCreditWarningTime = now
         if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[WoWTranslate] Out of credits! Translation disabled. Contact the addon author to add more credits.|r")
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[WoWTranslate] Monthly budget reached - translation paused. Raise WT_BUDGET (or ~/.config/wowtranslate/budget) to continue.|r")
         end
         return true
     end
@@ -154,6 +163,59 @@ function WoWTranslate_API.GetCacheSavingsFormatted()
     end
     local dollars = cents / 100
     return string.format("%d hits, %d chars, $%.2f saved", hits, chars, dollars)
+end
+
+-- ============================================================================
+-- REAL SPEND / BUDGET (from proxy __WT_STATS__ sentinel)
+-- ============================================================================
+
+-- Parse a "WTSTATS;spentusd=..;calls=..;intok=..;outtok=..;budgetusd=..;leftusd=.."
+-- payload that the proxy returns in the translation field. Returns true on match.
+function WoWTranslate_API.ParseStats(s)
+    if not s or string.find(s, "WTSTATS", 1, true) ~= 1 then return false end
+    local function num(key)
+        local _, _, v = string.find(s, key .. "=(-?[%d%.]+)")
+        return v and tonumber(v) or nil
+    end
+    spendUsd = num("spentusd") or spendUsd
+    spendCalls = num("calls") or spendCalls
+    spendInTok = num("intok") or spendInTok
+    spendOutTok = num("outtok") or spendOutTok
+    budgetUsd = num("budgetusd")
+    leftUsd = num("leftusd")
+    if budgetUsd == nil then budgetUsd = -1 end
+    if leftUsd == nil then leftUsd = -1 end
+    -- Keep the credit machinery in sync with the real budget so the existing
+    -- low/exhausted logic (and translation auto-stop) works against it.
+    if budgetUsd >= 0 and leftUsd >= 0 then
+        creditsRemaining = math.floor(leftUsd * 100 + 0.5)
+        creditsExhausted = (creditsRemaining <= 0)
+    end
+    return true
+end
+
+-- "Spent this month" line, e.g. "$0.0014  -  12 translations"
+function WoWTranslate_API.GetSpentFormatted()
+    if spendUsd < 0 then return "Unknown" end
+    local s = string.format("$%.4f this month", spendUsd)
+    if spendCalls and spendCalls >= 0 then
+        s = s .. string.format("  -  %d translations", spendCalls)
+    end
+    return s
+end
+
+-- "Budget" line, e.g. "$5.00  ->  $4.99 left" or "unlimited (your own API key)"
+function WoWTranslate_API.GetBudgetFormatted()
+    if budgetUsd == nil or budgetUsd < 0 then
+        return "unlimited (your own API key)"
+    end
+    local rest = leftUsd >= 0 and leftUsd or 0
+    return string.format("$%.2f  ->  $%.4f left", budgetUsd, rest)
+end
+
+-- True when a budget is set and less than $1.00 remains.
+function WoWTranslate_API.IsBudgetLow()
+    return budgetUsd and budgetUsd >= 0 and leftUsd >= 0 and leftUsd < 1.0
 end
 
 -- ============================================================================
@@ -199,6 +261,34 @@ function WoWTranslate_API.FetchCredits()
 
     local success = pcall(function()
         UnitXP("WoWTranslate", "translate_async", requestId, "hello", "en", "en")
+    end)
+
+    if success then
+        OnRequestQueued()
+    else
+        pendingRequests[requestId] = nil
+    end
+    return true
+end
+
+-- Fetch real spend/budget stats from the proxy. Free (no Claude call) — safe to
+-- poll while the config window is open. Updates spend/budget via ParseStats.
+function WoWTranslate_API.FetchStats()
+    if not dllAvailable then return false end
+
+    requestCounter = requestCounter + 1
+    local requestId = "stats_" .. tostring(requestCounter)
+
+    pendingRequests[requestId] = {
+        callback = function(translation, err)
+            if translation then WoWTranslate_API.ParseStats(translation) end
+        end,
+        text = "__WT_STATS__",
+        timestamp = GetTime()
+    }
+
+    local success = pcall(function()
+        UnitXP("WoWTranslate", "translate_async", requestId, "__WT_STATS__", "en", "en")
     end)
 
     if success then
@@ -276,11 +366,24 @@ function WoWTranslate_API.Translate(text, callback)
         timestamp = GetTime()
     }
 
-    -- Send request to DLL with configurable language direction
-    local fromLang = WoWTranslateDB and WoWTranslateDB.incomingFromLang or "zh"
+    -- Source is always auto-detected; user only picks the target language.
+    local fromLang = "auto"
     local toLang = WoWTranslateDB and WoWTranslateDB.incomingToLang or "en"
+    if toLang == "auto" then toLang = "en" end  -- target must be concrete
+    -- Append the languages the user understands so the proxy skips them (no call).
+    local toField = toLang
+    local understood = WoWTranslateDB and WoWTranslateDB.understoodLangs
+    if understood then
+        local keep = {}
+        for code, on in pairs(understood) do
+            if on and code ~= "auto" then table.insert(keep, code) end
+        end
+        if table.getn(keep) > 0 then
+            toField = toLang .. ";keep=" .. table.concat(keep, ",")
+        end
+    end
     local success, err = pcall(function()
-        UnitXP("WoWTranslate", "translate_async", requestId, text, fromLang, toLang)
+        UnitXP("WoWTranslate", "translate_async", requestId, text, fromLang, toField)
     end)
 
     if not success then
@@ -423,7 +526,7 @@ end
 
 -- Request an async outgoing translation (en -> zh)
 -- callback(translation, error) will be called when complete
-function WoWTranslate_API.TranslateOutgoing(text, callback)
+function WoWTranslate_API.TranslateOutgoing(text, callback, toLangOverride)
     if not dllAvailable then
         if callback then
             callback(nil, "DLL not available")
@@ -449,9 +552,11 @@ function WoWTranslate_API.TranslateOutgoing(text, callback)
         timestamp = GetTime()
     }
 
-    -- Send request to DLL with configurable language direction
-    local fromLang = WoWTranslateDB and WoWTranslateDB.outgoingFromLang or "en"
-    local toLang = WoWTranslateDB and WoWTranslateDB.outgoingToLang or "zh"
+    -- Source is always auto-detected (your own typed text); pick only the target.
+    -- toLangOverride lets the caller reply in a whisper partner's language.
+    local fromLang = "auto"
+    local toLang = toLangOverride or (WoWTranslateDB and WoWTranslateDB.outgoingToLang) or "zh"
+    if toLang == "auto" then toLang = "zh" end  -- target must be concrete
     local success, err = pcall(function()
         UnitXP("WoWTranslate", "translate_async", requestId, text, fromLang, toLang)
     end)

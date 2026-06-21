@@ -6,6 +6,7 @@
 -- LANGUAGES
 -- ============================================================================
 local LANGUAGES = {
+    { code = "auto", name = "Auto (any)" },
     { code = "zh", name = "Chinese" },
     { code = "en", name = "English" },
     { code = "ko", name = "Korean" },
@@ -15,6 +16,16 @@ local LANGUAGES = {
     { code = "fr", name = "French" },
     { code = "es", name = "Spanish" },
     { code = "pt", name = "Portuguese" },
+}
+
+-- Languages offered in the "I understand (don't translate)" grid. Label = the
+-- short tag shown to the user; code = the ISO code sent to the proxy.
+local UNDERSTAND_LANGS = {
+    { code = "en", label = "EN" }, { code = "de", label = "DE" },
+    { code = "fr", label = "FR" }, { code = "es", label = "ES" },
+    { code = "it", label = "IT" }, { code = "pt", label = "PT" },
+    { code = "ru", label = "RU" }, { code = "zh", label = "CN" },
+    { code = "ja", label = "JP" }, { code = "ko", label = "KR" },
 }
 
 local function GetLanguageIndex(code)
@@ -92,7 +103,7 @@ end
 local configFrame = CreateFrame("Frame", "WoWTranslateConfigFrame", UIParent)
 configFrame:Hide()
 configFrame:SetWidth(420)
-configFrame:SetHeight(780)  -- Increased for player name toggle
+configFrame:SetHeight(800)  -- single page: sections + "understand" grid
 configFrame:SetPoint("CENTER", 0, 0)
 configFrame:SetMovable(true)
 configFrame:EnableMouse(true)
@@ -145,16 +156,24 @@ local function CreateHeader(text, yPos)
     header:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, yPos)
     header:SetText(text)
     header:SetTextColor(1, 0.82, 0)
+
+    -- Thin gold divider under the header for clear section separation.
+    local line = configFrame:CreateTexture(nil, "ARTWORK")
+    line:SetTexture(1, 0.82, 0, 0.30)  -- vanilla: rgba = solid color
+    line:SetHeight(1)
+    line:SetWidth(370)
+    line:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, yPos - 22)
     return header
 end
 
 -- ============================================================================
 -- HELPER: Create Checkbox at specific position
 -- ============================================================================
-local function CreateCheckbox(label, xPos, yPos, configKey, subKey)
+local function CreateCheckbox(label, xPos, yPos, configKey, subKey, parent)
+    local p = parent or configFrame
     -- Create a wrapper frame like the language selector does
-    local wrapper = CreateFrame("Frame", nil, configFrame)
-    wrapper:SetPoint("TOPLEFT", configFrame, "TOPLEFT", xPos, yPos)
+    local wrapper = CreateFrame("Frame", nil, p)
+    wrapper:SetPoint("TOPLEFT", p, "TOPLEFT", xPos, yPos)
     wrapper:SetWidth(200)
     wrapper:SetHeight(24)
 
@@ -224,11 +243,15 @@ end
 -- ============================================================================
 -- HELPER: Create Language Selector
 -- ============================================================================
-local function CreateLangSelector(label, xPos, yPos, configKey)
-    local frame = CreateFrame("Frame", nil, configFrame)
-    frame:SetPoint("TOPLEFT", configFrame, "TOPLEFT", xPos, yPos)
+-- allowAuto: true for source ("From") selectors so "Auto (any)" can be chosen.
+-- Target ("To") selectors set it false -- you must translate INTO a concrete language.
+local function CreateLangSelector(label, xPos, yPos, configKey, parent, allowAuto)
+    local p = parent or configFrame
+    local frame = CreateFrame("Frame", nil, p)
+    frame:SetPoint("TOPLEFT", p, "TOPLEFT", xPos, yPos)
     frame:SetWidth(170)
     frame:SetHeight(50)
+    frame.minIndex = allowAuto and 1 or 2  -- index 1 == "auto"; skip it for targets
 
     local lbl = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     lbl:SetPoint("TOPLEFT", 0, 0)
@@ -263,7 +286,7 @@ local function CreateLangSelector(label, xPos, yPos, configKey)
         local parent = this:GetParent()
         local code = WoWTranslate_TempConfig[parent.configKey] or "zh"
         local idx = GetLanguageIndex(code) - 1
-        if idx < 1 then idx = table.getn(LANGUAGES) end
+        if idx < parent.minIndex then idx = table.getn(LANGUAGES) end
         WoWTranslate_TempConfig[parent.configKey] = LANGUAGES[idx].code
         parent.display:SetText(LANGUAGES[idx].name)
     end)
@@ -272,7 +295,7 @@ local function CreateLangSelector(label, xPos, yPos, configKey)
         local parent = this:GetParent()
         local code = WoWTranslate_TempConfig[parent.configKey] or "zh"
         local idx = GetLanguageIndex(code) + 1
-        if idx > table.getn(LANGUAGES) then idx = 1 end
+        if idx > table.getn(LANGUAGES) then idx = parent.minIndex end
         WoWTranslate_TempConfig[parent.configKey] = LANGUAGES[idx].code
         parent.display:SetText(LANGUAGES[idx].name)
     end)
@@ -289,27 +312,9 @@ local Y_API_HEADER = -50
 local Y_API_LABEL = -78
 local Y_API_EDIT = -100
 
--- Credits display (NEW in v0.10)
+-- Usage / budget display (3 lines: spent, budget, session savings)
 local Y_CREDITS = -135
-
-local Y_IN_HEADER = -175
-local Y_IN_ENABLE = -205
-local Y_IN_NAMES = -235
-local Y_IN_LANG = -270
-
-local Y_IN_CH_LABEL = -340
-local Y_IN_CH_ROW1 = -365
-local Y_IN_CH_ROW2 = -395
-local Y_IN_CH_ROW3 = -425
-
-local Y_OUT_HEADER = -460
-local Y_OUT_ENABLE = -490
-local Y_OUT_LANG = -525
-
-local Y_CH_LABEL = -595
-local Y_CH_ROW1 = -620
-local Y_CH_ROW2 = -650
-local Y_CH_ROW3 = -680
+-- (Incoming/Outgoing positions now live on their tab pages; see TAB BAR below.)
 
 -- API Settings Section
 CreateHeader("API Settings", Y_API_HEADER)
@@ -369,29 +374,41 @@ applyApiBtn:SetScript("OnClick", function()
     end
 end)
 
--- Credits Display (NEW in v0.10)
+-- Line 1: real spend this month (Claude backend = your own API key)
 local creditsLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 creditsLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, Y_CREDITS)
-creditsLabel:SetText("Credits Remaining:")
+creditsLabel:SetText("Spent:")
 
 local creditsDisplay = configFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 creditsDisplay:SetPoint("LEFT", creditsLabel, "RIGHT", 10, 0)
-creditsDisplay:SetWidth(100)
+creditsDisplay:SetWidth(330)
 creditsDisplay:SetJustifyH("LEFT")
+creditsDisplay:SetTextColor(0.2, 0.8, 0.2)  -- Green
 creditsDisplay:SetText("Unknown")
 configFrame.elements.creditsDisplay = creditsDisplay
 
--- Credits warning indicator
+-- Line 2: budget (self-imposed monthly cap) + low warning
+local budgetLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+budgetLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, Y_CREDITS - 20)
+budgetLabel:SetText("Budget:")
+
+local budgetDisplay = configFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+budgetDisplay:SetPoint("LEFT", budgetLabel, "RIGHT", 10, 0)
+budgetDisplay:SetWidth(240)
+budgetDisplay:SetJustifyH("LEFT")
+budgetDisplay:SetText("unlimited (your own API key)")
+configFrame.elements.budgetDisplay = budgetDisplay
+
 local creditsWarning = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-creditsWarning:SetPoint("LEFT", creditsDisplay, "RIGHT", 10, 0)
+creditsWarning:SetPoint("LEFT", budgetDisplay, "RIGHT", 8, 0)
 creditsWarning:SetTextColor(1, 0.5, 0)  -- Orange
 creditsWarning:SetText("")
 configFrame.elements.creditsWarning = creditsWarning
 
--- Cache Savings Display (session-based)
+-- Line 3: session cache savings
 local savingsLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-savingsLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, Y_CREDITS - 18)
-savingsLabel:SetText("Session Savings:")
+savingsLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, Y_CREDITS - 40)
+savingsLabel:SetText("Session savings:")
 
 local savingsDisplay = configFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 savingsDisplay:SetPoint("LEFT", savingsLabel, "RIGHT", 10, 0)
@@ -401,57 +418,69 @@ savingsDisplay:SetTextColor(0.2, 0.8, 0.2)  -- Green
 savingsDisplay:SetText("No cache hits yet")
 configFrame.elements.savingsDisplay = savingsDisplay
 
--- Incoming Translation Section
-CreateHeader("Incoming Translation (Chat -> You)", Y_IN_HEADER)
-configFrame.elements.inEnabled = CreateCheckbox("Enable Incoming Translation", 25, Y_IN_ENABLE, "enabled", nil)
-configFrame.elements.afkDisable = CreateCheckbox("Disable while AFK", 250, Y_IN_ENABLE, "disableWhileAfk", nil)
-configFrame.elements.translateSystem = CreateCheckbox("Translate system/emotes", 25, Y_IN_NAMES, "translateSystemMessages", nil)
-configFrame.elements.inFrom = CreateLangSelector("From:", 25, Y_IN_LANG, "incomingFromLang")
-configFrame.elements.inTo = CreateLangSelector("To:", 210, Y_IN_LANG, "incomingToLang")
+-- ============================================================================
+-- TRANSLATION SECTIONS (single page; the source language is ALWAYS auto-detected,
+-- so each direction only asks "translate INTO what?")
+-- ============================================================================
 
--- Incoming Channels Section
+-- ---- Incoming: chat you receive ----
+CreateHeader("Incoming  (chat -> me)", -190)
+configFrame.elements.inEnabled = CreateCheckbox("Enable Incoming Translation", 25, -218, "enabled", nil)
+configFrame.elements.afkDisable = CreateCheckbox("Disable while AFK", 250, -218, "disableWhileAfk", nil)
+configFrame.elements.translateSystem = CreateCheckbox("Translate system/emotes", 25, -244, "translateSystemMessages", nil)
+-- Everything NOT understood gets translated into this language.
+configFrame.elements.inTo = CreateLangSelector("Translate to:", 25, -274, "incomingToLang", nil, false)
+
+-- Languages you already read -> left untranslated (5 per row).
+local uLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+uLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, -330)
+uLabel:SetText("Don't translate:")
+local U_X = { 25, 100, 175, 250, 325 }
+for i, lng in ipairs(UNDERSTAND_LANGS) do
+    local col = math.mod(i - 1, 5) + 1
+    local yy = (i <= 5) and -352 or -376
+    configFrame.elements["und_" .. lng.code] =
+        CreateCheckbox(lng.label, U_X[col], yy, "understoodLangs", lng.code)
+end
+
 local inChLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-inChLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, Y_IN_CH_LABEL)
-inChLabel:SetText("Translate Incoming Channels:")
+inChLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, -406)
+inChLabel:SetText("Incoming Channels:")
 
--- Row 1: Say, Yell, Whisper
-configFrame.elements.inChSay = CreateCheckbox("Say", 25, Y_IN_CH_ROW1, "incomingChannels", "SAY")
-configFrame.elements.inChYell = CreateCheckbox("Yell", 140, Y_IN_CH_ROW1, "incomingChannels", "YELL")
-configFrame.elements.inChWhisper = CreateCheckbox("Whisper", 255, Y_IN_CH_ROW1, "incomingChannels", "WHISPER")
+configFrame.elements.inChSay = CreateCheckbox("Say", 25, -428, "incomingChannels", "SAY")
+configFrame.elements.inChYell = CreateCheckbox("Yell", 140, -428, "incomingChannels", "YELL")
+configFrame.elements.inChWhisper = CreateCheckbox("Whisper", 255, -428, "incomingChannels", "WHISPER")
+configFrame.elements.inChParty = CreateCheckbox("Party", 25, -454, "incomingChannels", "PARTY")
+configFrame.elements.inChGuild = CreateCheckbox("Guild", 140, -454, "incomingChannels", "GUILD")
+configFrame.elements.inChRaid = CreateCheckbox("Raid", 255, -454, "incomingChannels", "RAID")
+configFrame.elements.inChBG = CreateCheckbox("Battleground", 25, -480, "incomingChannels", "BATTLEGROUND")
+configFrame.elements.inChChannel = CreateCheckbox("World/Local", 165, -480, "incomingChannels", "CHANNEL")
 
--- Row 2: Party, Guild, Raid
-configFrame.elements.inChParty = CreateCheckbox("Party", 25, Y_IN_CH_ROW2, "incomingChannels", "PARTY")
-configFrame.elements.inChGuild = CreateCheckbox("Guild", 140, Y_IN_CH_ROW2, "incomingChannels", "GUILD")
-configFrame.elements.inChRaid = CreateCheckbox("Raid", 255, Y_IN_CH_ROW2, "incomingChannels", "RAID")
+-- ---- Outgoing: what you send ----
+CreateHeader("Outgoing  (me -> chat)", -518)
+configFrame.elements.outEnabled = CreateCheckbox("Enable Outgoing Translation", 25, -546, "outgoingEnabled", nil)
+-- Source auto-detected (your own text) -> only choose the language to SEND in.
+configFrame.elements.outTo = CreateLangSelector("Translate to:", 25, -576, "outgoingToLang", nil, false)
 
--- Row 3: BG, Channel
-configFrame.elements.inChBG = CreateCheckbox("Battleground", 25, Y_IN_CH_ROW3, "incomingChannels", "BATTLEGROUND")
-configFrame.elements.inChChannel = CreateCheckbox("World/Local", 165, Y_IN_CH_ROW3, "incomingChannels", "CHANNEL")
+local outChLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+outChLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, -634)
+outChLabel:SetText("Outgoing Channels:")
 
--- Outgoing Translation Section
-CreateHeader("Outgoing Translation (You -> Chat)", Y_OUT_HEADER)
-configFrame.elements.outEnabled = CreateCheckbox("Enable Outgoing Translation", 25, Y_OUT_ENABLE, "outgoingEnabled", nil)
-configFrame.elements.outFrom = CreateLangSelector("From:", 25, Y_OUT_LANG, "outgoingFromLang")
-configFrame.elements.outTo = CreateLangSelector("To:", 210, Y_OUT_LANG, "outgoingToLang")
+configFrame.elements.chWhisper = CreateCheckbox("Whisper", 25, -656, "outgoingChannels", "WHISPER")
+configFrame.elements.chParty = CreateCheckbox("Party", 140, -656, "outgoingChannels", "PARTY")
+configFrame.elements.chSay = CreateCheckbox("Say", 255, -656, "outgoingChannels", "SAY")
+configFrame.elements.chGuild = CreateCheckbox("Guild", 25, -682, "outgoingChannels", "GUILD")
+configFrame.elements.chRaid = CreateCheckbox("Raid", 140, -682, "outgoingChannels", "RAID")
+configFrame.elements.chYell = CreateCheckbox("Yell", 255, -682, "outgoingChannels", "YELL")
+configFrame.elements.chBG = CreateCheckbox("Battleground", 25, -708, "outgoingChannels", "BATTLEGROUND")
+configFrame.elements.chChannel = CreateCheckbox("World/Local", 165, -708, "outgoingChannels", "CHANNEL")
 
--- Channels Section
-local chLabel = configFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-chLabel:SetPoint("TOPLEFT", configFrame, "TOPLEFT", 25, Y_CH_LABEL)
-chLabel:SetText("Outgoing Channels:")
-
--- Row 1: Whisper, Party, Say (spaced evenly)
-configFrame.elements.chWhisper = CreateCheckbox("Whisper", 25, Y_CH_ROW1, "outgoingChannels", "WHISPER")
-configFrame.elements.chParty = CreateCheckbox("Party", 140, Y_CH_ROW1, "outgoingChannels", "PARTY")
-configFrame.elements.chSay = CreateCheckbox("Say", 255, Y_CH_ROW1, "outgoingChannels", "SAY")
-
--- Row 2: Guild, Raid, Yell (spaced evenly)
-configFrame.elements.chGuild = CreateCheckbox("Guild", 25, Y_CH_ROW2, "outgoingChannels", "GUILD")
-configFrame.elements.chRaid = CreateCheckbox("Raid", 140, Y_CH_ROW2, "outgoingChannels", "RAID")
-configFrame.elements.chYell = CreateCheckbox("Yell", 255, Y_CH_ROW2, "outgoingChannels", "YELL")
-
--- Row 3: BG, Channel
-configFrame.elements.chBG = CreateCheckbox("Battleground", 25, Y_CH_ROW3, "outgoingChannels", "BATTLEGROUND")
-configFrame.elements.chChannel = CreateCheckbox("World/Local", 165, Y_CH_ROW3, "outgoingChannels", "CHANNEL")
+-- Divider above the action buttons.
+local btnDivider = configFrame:CreateTexture(nil, "ARTWORK")
+btnDivider:SetTexture(1, 0.82, 0, 0.30)
+btnDivider:SetHeight(1)
+btnDivider:SetWidth(370)
+btnDivider:SetPoint("BOTTOMLEFT", configFrame, "BOTTOMLEFT", 25, 58)
 
 -- Bottom Buttons
 local clearBtn = CreateFrame("Button", nil, configFrame, "UIPanelButtonTemplate")
@@ -478,6 +507,47 @@ saveBtn:SetScript("OnClick", function()
 end)
 
 -- ============================================================================
+-- USAGE / BUDGET DISPLAY
+-- ============================================================================
+-- Refreshes the spent/budget/savings lines from the cached API values.
+local function UpdateUsageDisplay()
+    local e = configFrame.elements
+    local api = WoWTranslate_API
+
+    if e.creditsDisplay then
+        if api and api.GetSpentFormatted then
+            e.creditsDisplay:SetText(api.GetSpentFormatted())
+        else
+            e.creditsDisplay:SetText("Unknown")
+        end
+    end
+
+    if e.budgetDisplay then
+        if api and api.GetBudgetFormatted then
+            e.budgetDisplay:SetText(api.GetBudgetFormatted())
+        else
+            e.budgetDisplay:SetText("unlimited (your own API key)")
+        end
+    end
+
+    if e.creditsWarning then
+        if api and api.IsBudgetLow and api.IsBudgetLow() then
+            e.creditsWarning:SetText("(budget nearly used!)")
+        else
+            e.creditsWarning:SetText("")
+        end
+    end
+
+    if e.savingsDisplay then
+        if api and api.GetCacheSavingsFormatted then
+            e.savingsDisplay:SetText(api.GetCacheSavingsFormatted())
+        else
+            e.savingsDisplay:SetText("No cache hits yet")
+        end
+    end
+end
+
+-- ============================================================================
 -- REFRESH UI FROM CONFIG
 -- ============================================================================
 local function RefreshUI()
@@ -491,45 +561,20 @@ local function RefreshUI()
         e.apiEdit:SetText("")
     end
 
-    -- Update credits display
-    if e.creditsDisplay then
-        if WoWTranslate_API and WoWTranslate_API.GetCreditsFormatted then
-            e.creditsDisplay:SetText(WoWTranslate_API.GetCreditsFormatted())
-
-            -- Show warning if credits are low
-            if WoWTranslate_API.IsCreditsLow and WoWTranslate_API.IsCreditsLow() then
-                e.creditsWarning:SetText("(Low - add credits soon!)")
-            else
-                e.creditsWarning:SetText("")
-            end
-        else
-            e.creditsDisplay:SetText("Unknown")
-            e.creditsWarning:SetText("")
-        end
-    end
-
-    -- Update cache savings display
-    if e.savingsDisplay then
-        if WoWTranslate_API and WoWTranslate_API.GetCacheSavingsFormatted then
-            e.savingsDisplay:SetText(WoWTranslate_API.GetCacheSavingsFormatted())
-        else
-            e.savingsDisplay:SetText("No cache hits yet")
-        end
-    end
+    -- Update spend / budget / savings display
+    UpdateUsageDisplay()
 
     if e.inEnabled then e.inEnabled:SetChecked(cfg.enabled) end
     if e.afkDisable then e.afkDisable:SetChecked(cfg.disableWhileAfk) end
     if e.translateSystem then e.translateSystem:SetChecked(cfg.translateSystemMessages) end
     if e.outEnabled then e.outEnabled:SetChecked(cfg.outgoingEnabled) end
 
-    if e.inFrom and e.inFrom.display then
-        e.inFrom.display:SetText(GetLanguageName(cfg.incomingFromLang or "zh"))
-    end
+    -- Source is always auto-detected now; only the two targets are user-set.
+    -- "auto" is not a valid target -- coerce any stale value to a concrete one.
+    if cfg.incomingToLang == "auto" then cfg.incomingToLang = "en" end
+    if cfg.outgoingToLang == "auto" then cfg.outgoingToLang = "zh" end
     if e.inTo and e.inTo.display then
         e.inTo.display:SetText(GetLanguageName(cfg.incomingToLang or "en"))
-    end
-    if e.outFrom and e.outFrom.display then
-        e.outFrom.display:SetText(GetLanguageName(cfg.outgoingFromLang or "en"))
     end
     if e.outTo and e.outTo.display then
         e.outTo.display:SetText(GetLanguageName(cfg.outgoingToLang or "zh"))
@@ -545,6 +590,13 @@ local function RefreshUI()
     if e.inChRaid then e.inChRaid:SetChecked(inCh.RAID) end
     if e.inChBG then e.inChBG:SetChecked(inCh.BATTLEGROUND) end
     if e.inChChannel then e.inChChannel:SetChecked(inCh.CHANNEL) end
+
+    -- "I understand" grid
+    local understood = cfg.understoodLangs or {}
+    for _, lng in ipairs(UNDERSTAND_LANGS) do
+        local cb = e["und_" .. lng.code]
+        if cb then cb:SetChecked(understood[lng.code]) end
+    end
 
     -- Outgoing channels
     local ch = cfg.outgoingChannels or {}
@@ -572,24 +624,11 @@ creditsUpdateFrame:SetScript("OnUpdate", function()
     if creditsUpdateElapsed >= 2 then  -- Update every 2 seconds
         creditsUpdateElapsed = 0
 
-        local e = configFrame.elements
-        if WoWTranslate_API then
-            -- Update credits
-            if e.creditsDisplay and WoWTranslate_API.GetCreditsFormatted then
-                e.creditsDisplay:SetText(WoWTranslate_API.GetCreditsFormatted())
-            end
-            if e.creditsWarning then
-                if WoWTranslate_API.IsCreditsLow and WoWTranslate_API.IsCreditsLow() then
-                    e.creditsWarning:SetText("(Low - add credits soon!)")
-                else
-                    e.creditsWarning:SetText("")
-                end
-            end
-            -- Update cache savings
-            if e.savingsDisplay and WoWTranslate_API.GetCacheSavingsFormatted then
-                e.savingsDisplay:SetText(WoWTranslate_API.GetCacheSavingsFormatted())
-            end
+        -- Pull fresh numbers from the proxy (free, no Claude call), then redraw.
+        if WoWTranslate_API and WoWTranslate_API.FetchStats then
+            WoWTranslate_API.FetchStats()
         end
+        UpdateUsageDisplay()
     end
 end)
 
@@ -599,8 +638,8 @@ end)
 function WoWTranslate_ShowConfig()
     LoadTempConfig()
     RefreshUI()
-    if WoWTranslate_API and WoWTranslate_API.FetchCredits then
-        WoWTranslate_API.FetchCredits()
+    if WoWTranslate_API and WoWTranslate_API.FetchStats then
+        WoWTranslate_API.FetchStats()
     end
     configFrame:Show()
 end

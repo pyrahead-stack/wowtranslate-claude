@@ -50,22 +50,57 @@ PRICING = {
 STATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage-stats.json")
 
 
+def _load_budget():
+    """Optionales Selbstlimit in USD pro Monat. Quelle (Vorrang):
+    Env WT_BUDGET, sonst Datei ~/.config/wowtranslate/budget. None = unbegrenzt."""
+    v = os.environ.get("WT_BUDGET")
+    if not v:
+        try:
+            with open(os.path.expanduser("~/.config/wowtranslate/budget"),
+                      "r", encoding="utf-8") as f:
+                v = f.read().strip()
+        except (FileNotFoundError, OSError):
+            return None
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+BUDGET = _load_budget()  # USD/Monat oder None (unbegrenzt)
+
+
 class UsageStats:
-    """Zaehlt API-Calls/Tokens persistent mit und schaetzt die Kosten.
-    Nur echte Claude-Calls landen hier — Cache-Hits kosten nichts."""
+    """Zaehlt API-Calls/Tokens persistent mit und schaetzt die Kosten — pro Monat.
+    Nur echte Claude-Calls landen hier — Cache-Hits/Skips kosten nichts.
+    Beim Monatswechsel werden die Zaehler beim naechsten add() zurueckgesetzt."""
 
     def __init__(self, path):
         self.path = path
         self.lock = threading.Lock()
-        self.data = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+        self.data = {"month": "", "calls": 0, "input_tokens": 0, "output_tokens": 0}
         try:
             with open(path, "r", encoding="utf-8") as f:
                 self.data.update(json.load(f))
         except (FileNotFoundError, ValueError):
             pass
 
+    @staticmethod
+    def _month():
+        return time.strftime("%Y-%m")
+
+    def _cost(self, intok, outtok):
+        pin, pout = PRICING.get(MODEL, PRICING["claude-haiku-4-5"])
+        return (intok * pin + outtok * pout) / 1_000_000
+
     def add(self, input_tokens, output_tokens):
         with self.lock:
+            if self.data.get("month") != self._month():
+                self.data["month"] = self._month()
+                self.data["calls"] = 0
+                self.data["input_tokens"] = 0
+                self.data["output_tokens"] = 0
             self.data["calls"] += 1
             self.data["input_tokens"] += input_tokens
             self.data["output_tokens"] += output_tokens
@@ -73,20 +108,36 @@ class UsageStats:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self.data, f)
             os.replace(tmp, self.path)
-            return self.cost()
+            return self._cost(self.data["input_tokens"], self.data["output_tokens"])
+
+    def snapshot(self):
+        """Aktuelle Monatszahlen (calls/in/out/cost). Stale Monat -> Nullen."""
+        with self.lock:
+            if self.data.get("month") != self._month():
+                return {"calls": 0, "in": 0, "out": 0, "cost": 0.0}
+            i, o = self.data["input_tokens"], self.data["output_tokens"]
+            return {"calls": self.data["calls"], "in": i, "out": o,
+                    "cost": self._cost(i, o)}
 
     def cost(self):
-        pin, pout = PRICING.get(MODEL, PRICING["claude-haiku-4-5"])
-        return (self.data["input_tokens"] * pin
-                + self.data["output_tokens"] * pout) / 1_000_000
+        s = self.snapshot()
+        return s["cost"]
 
     def summary(self):
-        return (f"{self.data['calls']} Calls, "
-                f"{self.data['input_tokens']}+{self.data['output_tokens']} Tokens, "
-                f"~${self.cost():.4f}")
+        s = self.snapshot()
+        return (f"{s['calls']} Calls, {s['in']}+{s['out']} Tokens, ~${s['cost']:.4f}"
+                + (f" (Budget ${BUDGET:.2f}/Monat)" if BUDGET else ""))
 
 
 STATS = UsageStats(STATS_PATH)
+
+
+def credits_remaining():
+    """creditsRemaining-Feld fuers Addon: bei gesetztem Budget die echten
+    Restcent, sonst eine Dummy-Grosszahl (Addon meldet dann nie 'out of credits')."""
+    if BUDGET is None:
+        return 99999999
+    return max(0, int(round((BUDGET - STATS.cost()) * 100)))
 
 # Cache-Datei liegt neben diesem Skript, damit sie unabhaengig vom CWD ist.
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation-cache.json")
@@ -302,16 +353,33 @@ def glossary_hint(text):
 # Funktionswoerter, die in fast jedem Satz vorkommen — bewusst diskriminierend
 # gewaehlt (Woerter, die mehrere Sprachen teilen, helfen wenig).
 STOPWORDS = {
+    # English deliberately broad: this is usually the read/target language, so the
+    # more English we recognise, the more English chat we SKIP (no call, no tag).
     "en": {"the", "and", "you", "for", "are", "with", "that", "this", "what",
-           "have", "not", "your", "can", "need", "anyone", "please", "where"},
+           "have", "not", "your", "can", "need", "anyone", "please", "where",
+           "is", "it", "a", "an", "to", "of", "in", "on", "at", "or", "if",
+           "im", "i", "me", "my", "we", "us", "he", "she", "they", "them",
+           "do", "does", "did", "be", "was", "were", "been", "am", "has", "had",
+           "will", "would", "should", "could", "but", "so", "no", "yes", "ok",
+           "just", "like", "know", "see", "now", "then", "here", "there", "how",
+           "when", "why", "who", "all", "any", "some", "get", "got", "want",
+           "thanks", "guys", "still", "about", "really", "much", "from", "out",
+           "going", "doing", "been", "into", "than", "them", "their", "there's"},
     "de": {"der", "die", "das", "und", "ist", "nicht", "ich", "wir", "ihr",
-           "mit", "auf", "ein", "eine", "sind", "wo", "auch", "noch", "brauche"},
+           "mit", "auf", "ein", "eine", "sind", "wo", "auch", "noch", "brauche",
+           "du", "den", "dem", "noch", "mal", "schon", "hast", "kein", "war",
+           "wie", "was", "wer", "warum", "hallo", "danke", "bitte", "jemand"},
     "fr": {"les", "des", "une", "est", "pas", "vous", "nous", "qui", "que",
-           "avec", "pour", "oui", "bonjour", "merci", "quelqu'un", "où"},
+           "avec", "pour", "oui", "bonjour", "merci", "quelqu'un", "où",
+           "je", "tu", "il", "elle", "ils", "ça", "ce", "un", "et", "mais",
+           "salut", "bien", "fait", "veux", "donjon", "comment", "non"},
     "es": {"los", "las", "una", "está", "qué", "por", "para", "pero", "hola",
-           "gracias", "dónde", "soy", "eres", "alguien", "necesito", "sí"},
+           "gracias", "dónde", "soy", "eres", "alguien", "necesito", "sí",
+           "el", "la", "un", "yo", "tú", "que", "con", "amigo", "quieres",
+           "como", "muy", "bien", "no", "grupo"},
     "pt": {"não", "você", "está", "obrigado", "uma", "isso", "onde", "nós",
-           "alguém", "preciso", "com", "para", "sim", "olá"},
+           "alguém", "preciso", "com", "para", "sim", "olá", "que", "por",
+           "eu", "um", "uma", "bom", "como", "ajudar", "missão", "grupo"},
 }
 
 
@@ -353,14 +421,36 @@ def detect_lang(text):
     return detect_script(text) or detect_latin(text)
 
 
+def parse_dst(dst_raw):
+    """Zerlegt das to-Feld. Format: 'en' ODER 'en;keep=en,de,fr'.
+    Liefert (target, keep_set). target ist immer in keep (en->en nie uebersetzen).
+    'keep' = Sprachen, die der Nutzer versteht -> nicht uebersetzen."""
+    parts = (dst_raw or "en").split(";")
+    target = (parts[0].strip().lower() or "en")
+    keep = {target}
+    for p in parts[1:]:
+        p = p.strip()
+        if p.startswith("keep="):
+            for c in p[5:].split(","):
+                c = c.strip().lower()
+                if c:
+                    keep.add(c)
+    return target, keep
+
+
 def translate(text, src, dst):
     """Ruft Claude auf und gibt den uebersetzten Text zurueck (raises bei Fehler)."""
     system = (
         f"You are a translation engine for World of Warcraft chat. "
         f"Translate the user's message from {lang_name(src)} to {lang_name(dst)}. "
-        f"Output ONLY the translation, nothing else — no quotes, no notes, no preamble. "
-        f"Keep player names, item links (text in brackets), numbers and emotes unchanged. "
-        f"If the text is already in {lang_name(dst)}, return it unchanged."
+        f"Begin your output with the DETECTED SOURCE language as a 2-letter lowercase "
+        f"ISO 639-1 code in double square brackets (e.g. [[fr]], [[de]], [[zh]], [[ru]], "
+        f"[[no]], [[nl]]), then IMMEDIATELY the translation. Example: [[fr]]Hello there. "
+        f"After that marker output ONLY the translation — no quotes, no notes, no preamble. "
+        f"NEVER ask questions, explain, apologize, or add any commentary. "
+        f"You are NOT a chat partner; you only transform text. "
+        f"Keep player names, item links (text in brackets), numbers, URLs and emotes unchanged. "
+        f"If the text is already in {lang_name(dst)}, return it unchanged (still prefix the marker)."
         + glossary_hint(text)
     )
     body = json.dumps({
@@ -424,29 +514,58 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(length).decode("utf-8"))
             text = req.get("text", "")
             src = req.get("from", "auto")
-            dst = req.get("to", "en")
+            dst, keep = parse_dst(req.get("to", "en"))  # keep = understood langs
             if not text:
                 self._send({"error": "empty text"}, 400)
+                return
+            # Stats-Sentinel: kein Claude-Call, kostet nichts. Liefert die echten
+            # Monatszahlen im translation-Feld (pipe-frei, das Addon parst sie).
+            if text == "__WT_STATS__":
+                s = STATS.snapshot()
+                budget = BUDGET if BUDGET is not None else -1.0
+                left = max(0.0, BUDGET - s["cost"]) if BUDGET is not None else -1.0
+                payload = ("WTSTATS;spentusd=%.6f;calls=%d;intok=%d;outtok=%d;"
+                           "budgetusd=%.6f;leftusd=%.6f"
+                           % (s["cost"], s["calls"], s["in"], s["out"], budget, left))
+                self._send({"translation": payload,
+                            "creditsRemaining": credits_remaining()})
+                return
+            # Nichts Uebersetzbares? Platzhalter-URLs (http://ph.wt/N) raus, dann pruefen
+            # ob ueberhaupt ein Buchstabe da ist. Nur Links/Zahlen/Symbole -> Original
+            # zurueck, KEIN Claude-Call (sonst antwortet das Modell konversationell).
+            stripped = re.sub(r'https?://\S+', '', text)
+            if not re.search(r'[^\W\d_]', stripped):
+                print(f"[skip:nichts] {text[:40]!r}")
+                self._send({"translation": text, "creditsRemaining": credits_remaining()})
                 return
             cached = CACHE.get(text, src, dst)
             if cached is not None:
                 print(f"[cache] {src}->{dst}: {text[:40]!r}")
-                self._send({"translation": cached, "creditsRemaining": 99999999})
+                self._send({"translation": cached, "creditsRemaining": credits_remaining()})
                 return
             # Vorfilter: schon Zielsprache -> immer durch; unsicher -> durch,
             # sofern nicht TRANSLATE_WHEN_UNSURE. Beides spart den API-Call.
             detected = detect_lang(text)
-            if detected == dst or (detected is None and not TRANSLATE_WHEN_UNSURE):
-                why = "schon-" + dst if detected == dst else "unsicher"
-                print(f"[skip:{why}] {src}->{dst}: {text[:40]!r}")
-                self._send({"translation": text, "creditsRemaining": 99999999})
+            # Bei from=auto auch unsichere/kurze Fremdtexte uebersetzen (z.B. "Bonjour",
+            # "Hola") — sonst blieben sie liegen. Sprachen, die der Nutzer versteht
+            # (keep, inkl. Zielsprache), werden uebersprungen.
+            twu = TRANSLATE_WHEN_UNSURE or (src == "auto")
+            if (detected is not None and detected in keep) or (detected is None and not twu):
+                why = ("verstanden:" + detected) if detected else "unsicher"
+                print(f"[skip:{why}] ->{dst}: {text[:40]!r}")
+                self._send({"translation": text, "creditsRemaining": credits_remaining()})
+                return
+            # Harte Budget-Grenze: ist das Monatslimit erreicht, KEIN neuer Call mehr
+            # (Cache-Hits oben werden weiter bedient = Offline-Modus). Original zurueck.
+            if BUDGET is not None and STATS.cost() >= BUDGET:
+                print(f"[budget] Limit erreicht, kein Call: {text[:40]!r}")
+                self._send({"translation": text, "creditsRemaining": 0})
                 return
             out, usage = translate(text, src, dst)
             CACHE.put(text, src, dst, out)
             total = STATS.add(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            print(f"[ok] {src}->{dst}: {text[:40]!r} -> {out[:40]!r}  (~${total:.4f} gesamt)")
-            # creditsRemaining gross genug, damit das Addon nie "out of credits" meldet
-            self._send({"translation": out, "creditsRemaining": 99999999})
+            print(f"[ok] {src}->{dst}: {text[:40]!r} -> {out[:40]!r}  (~${total:.4f} Monat)")
+            self._send({"translation": out, "creditsRemaining": credits_remaining()})
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
             print(f"[claude-http-error] {e.code}: {detail[:200]}")
