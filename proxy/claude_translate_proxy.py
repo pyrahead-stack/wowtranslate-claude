@@ -17,6 +17,7 @@ Start:
 
 import os
 import json
+import re
 import time
 import threading
 import urllib.request
@@ -146,22 +147,119 @@ def lang_name(code):
 # vorkommen, werden in den Prompt gehaengt -> kostet kaum Tokens.
 # Erweiterbar ueber proxy/glossary.json (wird gemerged, ueberschreibt Defaults).
 GLOSSARY = {
-    # Naxxramas / Classic-Raids & Bosse (zh -> en)
-    "老克": "Kel'Thuzad",
+    # --- Raids & Dungeons: chinesischer Name -> kanonischer englischer Name
+    #     (aus pfQuest/pfQuest-turtle zhCN-Locale, inkl. Turtle-Custom-Content) ---
+    "熔火之心": "Molten Core",
+    "黑翼之巢": "Blackwing Lair",
+    "纳克萨玛斯": "Naxxramas",
     "纳克": "Naxxramas",
-    "naxx": "Naxxramas",
-    "kt": "Kel'Thuzad",
-    "mc": "Molten Core",
-    "bwl": "Blackwing Lair",
+    "黑石深渊": "Blackrock Depths",
+    "黑石塔": "Blackrock Spire",
+    "斯坦索姆": "Stratholme",
+    "通灵学院": "Scholomance",
+    "厄运之槌": "Dire Maul",
+    "血色修道院": "Scarlet Monastery",
+    "死亡矿井": "The Deadmines",
+    "影牙城堡": "Shadowfang Keep",
+    "哀嚎洞穴": "Wailing Caverns",
+    "奥达曼": "Uldaman",
+    "玛拉顿": "Maraudon",
+    "诺莫瑞根": "Gnomeregan",
+    "剃刀沼泽": "Razorfen Kraul",
+    "剃刀高地": "Razorfen Downs",
+    # Turtle-WoW Custom-Raids/Dungeons
+    "翡翠圣殿": "Emerald Sanctum",
+    "仇恨熔炉采石场": "Hateforge Quarry",
+    "卡拉赞墓穴": "Karazhan Crypt",
+    "卡拉赞": "Karazhan",
+    "吉尔尼斯城": "Gilneas City",
+    "暴风城地牢": "Stormwind Vault",
+    "龙喉居所": "Dragonmaw Retreat",
+    "黑色沼泽": "The Black Morass",
+
+    # --- Bosse: chinesischer Name -> englischer Name ---
+    "拉格纳罗斯": "Ragnaros",
     "拉格": "Ragnaros",
+    "奥妮克希亚": "Onyxia",
     "奥妮": "Onyxia",
-    # Rollen / Slang (multi-lang -> en)
+    "奈法利安": "Nefarian",
+    "维克多·奈法里奥斯领主": "Lord Victor Nefarius",
+    "沙尔图拉": "Battleguard Sartura",
+    "哈霍兰公主": "Princess Huhuran",
+    "无疤者奥斯里安": "Ossirian the Unscarred",
+    "黑女巫法琳娜": "Grand Widow Faerlina",
+    "迈克斯纳": "Maexxna",
+    "洛欧塞布": "Loatheb",
+    "教官拉苏维奥斯": "Instructor Razuvious",
+    "收割者戈提克": "Gothik the Harvester",
+    "萨菲隆": "Sapphiron",
+    "帕奇维克": "Patchwerk",
+    "塔迪乌斯": "Thaddius",
+    "老克": "Kel'Thuzad",
+    "哈卡": "Hakkar",
+    "血领主曼多基尔": "Bloodlord Mandokir",
+    "高阶女祭司耶克里克": "High Priestess Jeklik",
+    "迦顿男爵": "Baron Geddon",
+    "加尔": "Garr",
+    "焚化者古雷曼格": "Golemagg the Incinerator",
+    "管理者埃克索图斯": "Majordomo Executus",
+    "鲁西弗隆": "Lucifron",
+    "勒什雷尔": "Broodlord Lashlayer",
+    "堕落的瓦拉斯塔兹": "Vaelastrasz the Corrupt",
+    "克洛玛古斯": "Chromaggus",
+    "埃博诺克": "Ebonroc",
+    "费尔默": "Firemaw",
+    "弗莱格尔": "Flamegor",
+    "艾德温·范克里夫": "Edwin VanCleef",
+    "大法师阿鲁高": "Archmage Arugal",
+    "赫洛德": "Herod",
+    "秘法师杜安": "Arcanist Doan",
+    "通灵院长·加丁": "Darkmaster Gandling",
+    "瑞文戴尔男爵": "Baron Rivendare",
+    "莱斯·霜语": "Ras Frostwhisper",
+    "达格兰·索瑞森大帝": "Emperor Dagran Thaurissan",
+    "重拳先生": "Mr. Smite",
+    # Turtle-WoW Custom-Bosse
+    "埃伦纽斯": "Erennius",
+    "索尔纽斯": "Solnius",
+    "阿拉鲁斯": "Alarus",
+    "艾丝卓仕·格瑞姆弗雷姆": "Aszosh Grimflame",
+
+    # --- Rollen / Slang (multi-lang -> en) ---
     "坦克": "tank",
     "奶": "healer",
+    "奶妈": "healer",
     "法师": "mage",
+    "猎人": "hunter",
+    "盗贼": "rogue",
+    "术士": "warlock",
+    "牧师": "priest",
+    "战士": "warrior",
+    "德鲁伊": "druid",
+    "萨满": "shaman",
+    "圣骑士": "paladin",
+    "组队": "looking for group",
+    "求组": "looking for group",
+    "公会": "guild",
+
+    # --- Englische Abkuerzungen -> Vollname (Wortgrenzen-Match, s. unten).
+    #     Bewusst nur eindeutige; mehrdeutige wie "dm"/"es" ausgelassen. ---
+    "mc": "Molten Core",
+    "bwl": "Blackwing Lair",
+    "naxx": "Naxxramas",
+    "zg": "Zul'Gurub",
+    "aq40": "Temple of Ahn'Qiraj",
+    "aq20": "Ruins of Ahn'Qiraj",
+    "ubrs": "Upper Blackrock Spire",
+    "lbrs": "Lower Blackrock Spire",
+    "brd": "Blackrock Depths",
+    "strat": "Stratholme",
+    "scholo": "Scholomance",
+    "kara": "Karazhan",
+    "kt": "Kel'Thuzad",
+    "ony": "Onyxia",
     "lfg": "looking for group",
     "lfm": "looking for more",
-    "ony": "Onyxia",
 }
 
 GLOSSARY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "glossary.json")
@@ -174,9 +272,19 @@ except (FileNotFoundError, ValueError):
 
 def glossary_hint(text):
     """Liefert die im Text vorkommenden Glossar-Eintraege als Prompt-Zusatz
-    (oder '' wenn keiner passt). Match case-insensitiv."""
+    (oder '' wenn keiner passt).
+
+    ASCII-Begriffe (Abkuerzungen wie 'mc', 'kt') werden an Wortgrenzen geprueft,
+    damit 'es' nicht in 'goes' o.ae. matcht. CJK-Begriffe haben keine Wort-
+    grenzen -> einfacher Substring-Treffer."""
     low = text.lower()
-    hits = [f"{term} = {trans}" for term, trans in GLOSSARY.items() if term.lower() in low]
+    hits = []
+    for term, trans in GLOSSARY.items():
+        if term.isascii():
+            if re.search(r"\b" + re.escape(term.lower()) + r"\b", low):
+                hits.append(f"{term} = {trans}")
+        elif term in text:
+            hits.append(f"{term} = {trans}")
     if not hits:
         return ""
     return (

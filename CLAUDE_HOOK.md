@@ -68,9 +68,14 @@ sich sofort (blockiert den Spielstart nicht).
 - **Persistenter Cache:** `proxy/translation-cache.json` (neben dem Skript, per
   `.gitignore` ausgeschlossen). Bereits übersetzte Zeilen sind danach über alle
   Chars/Neustarts hinweg sofort & kostenlos. Datei einfach löschen zum Leeren.
-- **WoW-Glossar:** eingebaute Begriffsliste (Boss-/Raid-/Slang-Namen) sorgt für
-  korrekte Übersetzungen (`老克 → Kel'Thuzad` statt „Old gram"). Nur Begriffe,
-  die im Text vorkommen, landen im Prompt → kaum Token-Kosten. Erweiterbar über
+- **WoW-Glossar:** eingebaute Begriffsliste (Raids, Dungeons, Bosse, Klassen,
+  Slang) sorgt für korrekte Übersetzungen (`老克 → Kel'Thuzad`, `翡翠圣殿 →
+  Emerald Sanctum`). Chinesische Namen stammen aus den pfQuest/pfQuest-turtle
+  zhCN-Locales und decken auch **Turtle-WoW-Custom-Content** ab (Emerald Sanctum,
+  Hateforge Quarry, Karazhan, Gilneas City …). Dazu gängige englische Abkürzungen
+  (`naxx`, `bwl`, `kt`, `strat` …). Nur Begriffe, die im Text vorkommen, landen im
+  Prompt → kaum Token-Kosten. Matching: CJK per Substring, ASCII-Abkürzungen an
+  Wortgrenzen (damit `es` nicht in „goes" matcht). Erweiterbar über
   `proxy/glossary.json` (`{"begriff": "übersetzung"}`, wird über die Defaults
   gemerged).
 - **Retry:** bei Overload/Rate-Limit/Netzwerkblip (429/500/503/529) wiederholt der
