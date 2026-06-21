@@ -35,3 +35,7 @@ WTF/
 # Proxy translation cache (local, per-user)
 proxy/translation-cache.json
 proxy/translation-cache.json.tmp
+
+# Python
+__pycache__/
+*.pyc
