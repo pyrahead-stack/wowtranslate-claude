@@ -7,10 +7,6 @@ A fork of [sanjaygbhat/wow-translate](https://github.com/sanjaygbhat/wow-transla
 original sends chat to a commercial cloud backend; this version talks to a local proxy
 and your own Anthropic key.
 
-> [!NOTE]
-> New to the terminal? Don't worry — this guide spells out every command and tells you
-> exactly what to type and what you should see. Just follow the sections in order.
-
 ## Contents
 
 - [What it does](#what-it-does)
