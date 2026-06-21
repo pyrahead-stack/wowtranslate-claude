@@ -15,7 +15,8 @@ What that means in practice:
 
 - You run the proxy yourself and use your own Anthropic key.
 - Billing is pay-per-use directly to Anthropic — there is no separate subscription for
-  this addon. See [Cost and API key](#cost-and-api-key) for actual prices.
+  this addon. See [Getting an API key](#getting-an-api-key-step-by-step) and
+  [Cost](#cost) for the actual setup and prices.
 - Incoming chat (e.g. Chinese → English) is translated for you to read. Outgoing
   translation (your text → another language) is optional and off by default.
 
@@ -30,35 +31,68 @@ German implementation notes: [`CLAUDE_HOOK.md`](CLAUDE_HOOK.md).
   host and the WoW client reaches it over loopback automatically.
 - An **Anthropic account and API key** (next section).
 
-## Cost and API key
+## Getting an API key (step by step)
 
-The proxy needs an Anthropic API key. To get one:
+The proxy needs one Anthropic API key. Beginner-friendly walkthrough:
 
-1. Create an account at [console.anthropic.com](https://console.anthropic.com/).
-2. Add credit under **Billing**. The minimum first purchase is **$5** (Tier 1).
-3. Create a key under **API keys** and use it as `ANTHROPIC_API_KEY` for the proxy.
+1. Go to **[platform.claude.com](https://platform.claude.com/)** (the old
+   `console.anthropic.com` redirects here) and sign up — *Continue with Google* or email.
+2. When asked **"How will you use the Claude API?"**, choose **Individual**.
+3. **Buy usage credits:** pick **$5** ("Trying it out"). Adding credit requires a billing
+   address and a **credit card**.
+   - **Important: do NOT enable auto-reload** ("Automatisches Neuladen aktivieren" — leave
+     it off). With auto-reload off, your card can never be charged again, so the $5 is a
+     hard ceiling. It lasts a very long time for chat.
+4. In the left sidebar open **API keys → Create key**, name it (e.g. `wowtranslate`), and
+   **copy the `sk-ant-...` value** — it is shown only once.
 
-Cost is pay-per-use. The default model `claude-haiku-4-5` is **$1 per million input
-tokens** and **$5 per million output tokens**. A chat line is only a few dozen tokens,
-and this fork avoids needless calls (local cache, glossary, and a language pre-filter
-that skips text already in your language), so typical use is cheap — but you set and
-monitor your own spend limit in the Console. The `$5` minimum lasts a long time for
-normal chat.
+That key is what the proxy uses. The in-game `/wt key` field is a separate dummy this fork
+ignores.
 
-### Sharing keys with others
+### Cost
 
-All keys you create bill to **your** account/credits, so you can hand a key to a friend
-and their proxy will use it. To cap how much each person can spend, use **Workspaces**:
+Pay-per-use, no subscription. The default model `claude-haiku-4-5` is **$1 per million
+input tokens** / **$5 per million output tokens**. A chat line is only a few dozen tokens,
+and the proxy avoids needless calls (local cache, glossary, and a language pre-filter that
+passes through text already in your language), so real-world use is very cheap. Because
+the balance is prepaid and auto-reload is off, you can never spend more than you loaded.
 
-1. In the Console, create a **Workspace** (you can't limit the default one).
-2. Set a monthly **spend limit** on it under **Settings → Limits** (e.g. `$2`).
-3. Create an **API key inside that Workspace** — keys are tied to their Workspace and
-   can't exceed its spend limit.
-4. Give that key to the other person.
+### Using the key with the proxy
 
-The limit is a monthly dollar cap (resets each month), configurable only in the Console
-UI. A shared key grants Claude API access up to its cap until you rotate or revoke it in
-the Console, so treat it like any credential.
+Either export it for one session:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+python3 proxy/claude_translate_proxy.py
+```
+
+Or store it once so `proxy/start-proxy.sh` picks it up (kept out of shell history and
+`ps` output):
+
+```bash
+mkdir -p ~/.config/wowtranslate
+read -rs K && (umask 077; printf '%s' "$K" > ~/.config/wowtranslate/anthropic.key) && unset K
+proxy/start-proxy.sh
+```
+
+### Sharing a key with a friend
+
+All keys you create bill to **your** account, so you can hand a friend a key and their
+proxy will use it. What actually bounds the cost:
+
+- **Your prepaid balance is the only hard cap.** With auto-reload off, total spend across
+  every key can never exceed what you loaded (e.g. $5). This is the real safety net.
+- For a **separate, independently revocable key per person** (and per-person cost
+  tracking), create a **Workspace**: Console → **Settings → Workspaces → Create**, switch
+  to it with the top-left selector, then make the key on the **API keys** page. (The
+  Dashboard always shows the org-wide overview, which is why it looks like it "snaps back"
+  to Default — that's normal; the API keys / Cost / Logs pages do respect the selected
+  workspace.)
+- A workspace's **Limits** tab offers a **spend notification** (email alert at, say, $2)
+  and **rate limits** — but note these are **alerts/throttles, not a guaranteed hard
+  stop**. There is currently no reliable "$2 then cut off" per-key cap in the Console; the
+  dependable limit is the prepaid balance above.
+- You can **revoke** any key anytime: API keys → `⋯` → delete.
 
 References: [Rate & spend limits](https://platform.claude.com/docs/en/api/rate-limits),
 [Workspaces](https://platform.claude.com/docs/en/manage-claude/workspaces).
