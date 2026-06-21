@@ -32,7 +32,7 @@ button:SetFrameStrata("MEDIUM")
 button:SetFrameLevel(8)
 button:EnableMouse(true)
 button:SetMovable(true)
-button:RegisterForClicks("LeftButtonUp")
+button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 button:RegisterForDrag("LeftButton")
 
 -- Icon texture (scroll/note — fits "translation" theme)
@@ -84,11 +84,139 @@ button:SetScript("OnDragStop", function()
 end)
 
 -- ============================================================================
+-- QUICK OUTGOING-LANGUAGE MENU (right-click)
+-- ============================================================================
+-- Sprachliste in Sync mit WoWTranslate_Config.lua. Reihenfolge = Antwort-Haeufigkeit.
+local QUICK_LANGS = {
+    { code = "fr", name = "French" },
+    { code = "es", name = "Spanish" },
+    { code = "de", name = "German" },
+    { code = "pt", name = "Portuguese" },
+    { code = "ru", name = "Russian" },
+    { code = "zh", name = "Chinese" },
+    { code = "en", name = "English" },
+    { code = "ko", name = "Korean" },
+    { code = "ja", name = "Japanese" },
+}
+
+local ROW_H = 15
+local MENU_W = 140
+local quickMenu  -- wird einmalig erzeugt
+
+local function WT_Msg(text)
+    DEFAULT_CHAT_FRAME:AddMessage("|cFF66CCFF[WoWTranslate]|r " .. text)
+end
+
+local function RefreshQuickMenu()
+    if not quickMenu then return end
+    local on = WoWTranslateDB and WoWTranslateDB.outgoingEnabled
+    local cur = (WoWTranslateDB and WoWTranslateDB.outgoingToLang) or "zh"
+    quickMenu.toggle.text:SetText(on and "Outgoing: |cFF00FF00ON|r" or "Outgoing: |cFFFF0000OFF|r")
+    for i = 1, table.getn(quickMenu.langRows) do
+        local row = quickMenu.langRows[i]
+        if row.code == cur then
+            row.text:SetText("|cFFFFD100> " .. row.label .. "|r")
+        else
+            row.text:SetText("   " .. row.label)
+        end
+    end
+end
+
+local function MakeRow(parent, y, onclick)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetWidth(MENU_W - 16)
+    b:SetHeight(ROW_H)
+    b:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+    local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fs:SetPoint("LEFT", b, "LEFT", 2, 0)
+    fs:SetJustifyH("LEFT")
+    b.text = fs
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+    hl:SetBlendMode("ADD")
+    hl:SetAllPoints(b)
+    b:SetScript("OnClick", onclick)
+    return b
+end
+
+local function BuildQuickMenu()
+    local n = table.getn(QUICK_LANGS)
+    local height = 10 + ROW_H + 6 + ROW_H + 6 + (n * ROW_H) + 8
+    local m = CreateFrame("Frame", "WoWTranslateQuickMenu", UIParent)
+    m:SetFrameStrata("DIALOG")
+    m:SetWidth(MENU_W)
+    m:SetHeight(height)
+    m:EnableMouse(true)
+    m:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    m:Hide()
+
+    local title = m:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    title:SetPoint("TOPLEFT", m, "TOPLEFT", 8, -8)
+    title:SetText("Reply language")
+
+    local y = -8 - ROW_H - 4
+    m.toggle = MakeRow(m, y, function()
+        if not WoWTranslateDB then WoWTranslateDB = {} end
+        WoWTranslateDB.outgoingEnabled = not WoWTranslateDB.outgoingEnabled
+        if WoWTranslate_TempConfig then
+            WoWTranslate_TempConfig.outgoingEnabled = WoWTranslateDB.outgoingEnabled
+        end
+        WT_Msg("outgoing translation: " ..
+            (WoWTranslateDB.outgoingEnabled and "|cFF00FF00ON|r" or "|cFFFF0000OFF|r"))
+        RefreshQuickMenu()
+    end)
+
+    y = y - ROW_H - 4
+    m.langRows = {}
+    for i = 1, table.getn(QUICK_LANGS) do
+        local lang = QUICK_LANGS[i]
+        local row = MakeRow(m, y, function()
+            if not WoWTranslateDB then WoWTranslateDB = {} end
+            WoWTranslateDB.outgoingToLang = lang.code
+            WoWTranslateDB.outgoingEnabled = true
+            if WoWTranslate_TempConfig then
+                WoWTranslate_TempConfig.outgoingToLang = lang.code
+                WoWTranslate_TempConfig.outgoingEnabled = true
+            end
+            WT_Msg("reply in |cFFFFD100" .. lang.name .. "|r |cFF00FF00(outgoing ON)|r")
+            RefreshQuickMenu()
+            m:Hide()
+        end)
+        row.code = lang.code
+        row.label = lang.name
+        m.langRows[i] = row
+        y = y - ROW_H
+    end
+
+    quickMenu = m
+    return m
+end
+
+function WoWTranslate_ToggleQuickMenu()
+    if not quickMenu then BuildQuickMenu() end
+    if quickMenu:IsShown() then
+        quickMenu:Hide()
+        return
+    end
+    quickMenu:ClearAllPoints()
+    quickMenu:SetPoint("TOP", WoWTranslateMinimapButton, "BOTTOM", 0, -2)
+    RefreshQuickMenu()
+    quickMenu:Show()
+end
+
+-- ============================================================================
 -- CLICK HANDLER
 -- ============================================================================
 button:SetScript("OnClick", function()
     if isDragging then return end
-    if WoWTranslate_ToggleConfig then
+    if arg1 == "RightButton" then
+        WoWTranslate_ToggleQuickMenu()
+    elseif WoWTranslate_ToggleConfig then
         WoWTranslate_ToggleConfig()
     end
 end)
@@ -100,7 +228,12 @@ button:SetScript("OnEnter", function()
     if isDragging then return end
     GameTooltip:SetOwner(this, "ANCHOR_LEFT")
     GameTooltip:AddLine("WoWTranslate")
-    GameTooltip:AddLine("Click to open settings", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Left-click: settings", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine("Right-click: quick reply language", 0.8, 0.8, 0.8)
+    local cur = (WoWTranslateDB and WoWTranslateDB.outgoingToLang) or "zh"
+    local on = WoWTranslateDB and WoWTranslateDB.outgoingEnabled
+    GameTooltip:AddLine("Outgoing: " .. (on and "ON" or "OFF") .. " -> " .. cur,
+        0.4, 0.8, 1.0)
     GameTooltip:Show()
 end)
 
