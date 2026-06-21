@@ -5,6 +5,7 @@
 ## Author: WoWTranslate Team
 ## SavedVariables: WoWTranslateDB WoWTranslateCache WoWTranslateDebugLog
 
+WoWTranslate_Locale.lua
 WoWTranslate_Glossary.lua
 WoWTranslate_Cache.lua
 WoWTranslate_API.lua

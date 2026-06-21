@@ -129,7 +129,7 @@ function WoWTranslate_API.ShowCreditWarningIfNeeded()
     if now - lastCreditWarningTime >= 60 then
         lastCreditWarningTime = now
         if DEFAULT_CHAT_FRAME then
-            DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[WoWTranslate] Monthly budget reached - translation paused. Raise WT_BUDGET (or ~/.config/wowtranslate/budget) to continue.|r")
+            DEFAULT_CHAT_FRAME:AddMessage("|cFFFF0000[WoWTranslate] " .. WoWTranslate_L.MSG_BUDGET_REACHED .. "|r")
         end
         return true
     end

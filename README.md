@@ -151,7 +151,13 @@ stays off until you turn it on.
 | `/wt status` | Show status |
 | `/wt test 你好` | Test a translation |
 | `/wt outgoing on` / `off` | Toggle translating your own outgoing messages |
+| `/wt lang <xx>` | Set the interface language (e.g. `de`, `fr`, `ru`; `auto` follows your WoW client) |
 | `/wt clearcache` | Clear the in-game translation cache |
+
+The in-game interface (settings panel, minimap menu, chat messages) is available in
+English, German, French, Spanish, Portuguese, Italian, Russian, Chinese, Korean and
+Japanese. It follows your WoW client language by default; override it with `/wt lang <xx>`
+and type `/reload` to update the panel.
 
 ## Auto-start (optional)
 

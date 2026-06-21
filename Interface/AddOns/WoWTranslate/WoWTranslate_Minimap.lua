@@ -2,6 +2,8 @@
 -- Minimap button for WoWTranslate (Atlas pattern)
 -- Left-click toggles config panel, drag to reposition around minimap edge
 
+local L = WoWTranslate_L
+
 local MINIMAP_BUTTON_RADIUS = 80
 local DEFAULT_POSITION = 225  -- degrees, bottom-left area
 local isDragging = false
@@ -111,7 +113,8 @@ local function RefreshQuickMenu()
     if not quickMenu then return end
     local on = WoWTranslateDB and WoWTranslateDB.outgoingEnabled
     local cur = (WoWTranslateDB and WoWTranslateDB.outgoingToLang) or "zh"
-    quickMenu.toggle.text:SetText(on and "Outgoing: |cFF00FF00ON|r" or "Outgoing: |cFFFF0000OFF|r")
+    quickMenu.toggle.text:SetText(L.OUTGOING_LABEL .. " " ..
+        (on and ("|cFF00FF00" .. L.ON .. "|r") or ("|cFFFF0000" .. L.OFF .. "|r")))
     for i = 1, table.getn(quickMenu.langRows) do
         local row = quickMenu.langRows[i]
         if row.code == cur then
@@ -157,7 +160,7 @@ local function BuildQuickMenu()
 
     local title = m:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     title:SetPoint("TOPLEFT", m, "TOPLEFT", 8, -8)
-    title:SetText("Reply language")
+    title:SetText(L.REPLY_LANGUAGE)
 
     local y = -8 - ROW_H - 4
     m.toggle = MakeRow(m, y, function()
@@ -166,8 +169,8 @@ local function BuildQuickMenu()
         if WoWTranslate_TempConfig then
             WoWTranslate_TempConfig.outgoingEnabled = WoWTranslateDB.outgoingEnabled
         end
-        WT_Msg("outgoing translation: " ..
-            (WoWTranslateDB.outgoingEnabled and "|cFF00FF00ON|r" or "|cFFFF0000OFF|r"))
+        WT_Msg(L.MSG_OUTGOING_TOGGLE .. " " ..
+            (WoWTranslateDB.outgoingEnabled and ("|cFF00FF00" .. L.ON .. "|r") or ("|cFFFF0000" .. L.OFF .. "|r")))
         RefreshQuickMenu()
     end)
 
@@ -183,7 +186,7 @@ local function BuildQuickMenu()
                 WoWTranslate_TempConfig.outgoingToLang = lang.code
                 WoWTranslate_TempConfig.outgoingEnabled = true
             end
-            WT_Msg("reply in |cFFFFD100" .. lang.name .. "|r |cFF00FF00(outgoing ON)|r")
+            WT_Msg(L.MSG_REPLY_IN .. " |cFFFFD100" .. lang.name .. "|r |cFF00FF00" .. L.PAREN_OUTGOING_ON .. "|r")
             RefreshQuickMenu()
             m:Hide()
         end)
@@ -228,11 +231,11 @@ button:SetScript("OnEnter", function()
     if isDragging then return end
     GameTooltip:SetOwner(this, "ANCHOR_LEFT")
     GameTooltip:AddLine("WoWTranslate")
-    GameTooltip:AddLine("Left-click: settings", 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("Right-click: quick reply language", 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L.TT_LEFTCLICK, 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L.TT_RIGHTCLICK, 0.8, 0.8, 0.8)
     local cur = (WoWTranslateDB and WoWTranslateDB.outgoingToLang) or "zh"
     local on = WoWTranslateDB and WoWTranslateDB.outgoingEnabled
-    GameTooltip:AddLine("Outgoing: " .. (on and "ON" or "OFF") .. " -> " .. cur,
+    GameTooltip:AddLine(L.OUTGOING_LABEL .. " " .. (on and L.ON or L.OFF) .. " -> " .. cur,
         0.4, 0.8, 1.0)
     GameTooltip:Show()
 end)
