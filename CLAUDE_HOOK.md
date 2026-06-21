@@ -86,6 +86,16 @@ sich sofort (blockiert den Spielstart nicht).
   Preise je 1M Tokens: Haiku 4.5 = $1/$5, Sonnet 4.6 = $3/$15. Nur echte
   API-Calls zählen, Cache-Hits sind gratis. Datei löschen = Zähler zurücksetzen.
 
+- **Sprach-Vorfilter (lokal, gratis):** vor jedem Claude-Call erkennt der Proxy
+  die Sprache — Schrift-basiert für CJK/Kyrillisch/Hangul (sehr sicher),
+  Stopwörter für lateinische Sprachen (en/de/fr/es/pt). Entscheidung:
+  - erkannte Sprache = **Zielsprache** → Text 1:1 durch (kein Call, spart Geld);
+  - **unsicher** (zu kurz / kein klares Signal) → 1:1 durch;
+  - sonst → an Claude übersetzen.
+  Chinesisch wird über die Schrift fast immer sicher erkannt, fällt also nie in
+  „unsicher". Flag `TRANSLATE_WHEN_UNSURE` (Default `False`) dreht die
+  Unsicher-Behandlung um, falls gewünscht.
+
 > **Kein Prompt-Caching:** bewusst weggelassen — Anthropic cached erst ab ~4096
 > Token Prefix (Haiku), unser System-Prompt ist ~100 Token. `cache_control` würde
 > hier nichts bringen.

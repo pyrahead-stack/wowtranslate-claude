@@ -28,6 +28,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LISTEN_HOST = "127.0.0.1"
 LISTEN_PORT = 8787
 MODEL = "claude-haiku-4-5"          # schnell + guenstig, ideal fuer Chat
+# Bei unsicherer Spracherkennung: True = trotzdem an Claude schicken,
+# False = Text 1:1 durchreichen (spart Calls, Standard).
+TRANSLATE_WHEN_UNSURE = False
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -293,6 +296,63 @@ def glossary_hint(text):
     )
 
 
+# ----- Spracherkennung (lokal, gratis) -------------------------------------
+# Schrift-basiert (sehr sicher) fuer CJK/Kyrillisch/Hangul, Stopwoerter fuer
+# lateinische Sprachen. Liefert einen Sprachcode oder None ("unsicher").
+# Funktionswoerter, die in fast jedem Satz vorkommen — bewusst diskriminierend
+# gewaehlt (Woerter, die mehrere Sprachen teilen, helfen wenig).
+STOPWORDS = {
+    "en": {"the", "and", "you", "for", "are", "with", "that", "this", "what",
+           "have", "not", "your", "can", "need", "anyone", "please", "where"},
+    "de": {"der", "die", "das", "und", "ist", "nicht", "ich", "wir", "ihr",
+           "mit", "auf", "ein", "eine", "sind", "wo", "auch", "noch", "brauche"},
+    "fr": {"les", "des", "une", "est", "pas", "vous", "nous", "qui", "que",
+           "avec", "pour", "oui", "bonjour", "merci", "quelqu'un", "où"},
+    "es": {"los", "las", "una", "está", "qué", "por", "para", "pero", "hola",
+           "gracias", "dónde", "soy", "eres", "alguien", "necesito", "sí"},
+    "pt": {"não", "você", "está", "obrigado", "uma", "isso", "onde", "nós",
+           "alguém", "preciso", "com", "para", "sim", "olá"},
+}
+
+
+def detect_script(text):
+    """Eindeutige Schrift-Erkennung (hohe Sicherheit). None = kein CJK/Cyr/Hangul."""
+    for ch in text:
+        o = ord(ch)
+        if 0x4E00 <= o <= 0x9FFF:      # CJK Unified Ideographs
+            return "zh"
+        if 0x3040 <= o <= 0x30FF:      # Hiragana/Katakana
+            return "ja"
+        if 0xAC00 <= o <= 0xD7AF:      # Hangul
+            return "ko"
+        if 0x0400 <= o <= 0x04FF:      # Kyrillisch
+            return "ru"
+    return None
+
+
+_WORD_RE = re.compile(r"[a-zà-ÿñ']+")
+
+
+def detect_latin(text):
+    """Stopwort-Erkennung fuer lateinische Sprachen. None bei zu kurzem Text
+    oder ohne klaren Sieger (Gleichstand)."""
+    words = _WORD_RE.findall(text.lower())
+    if len(words) < 3:                 # zu wenig Signal
+        return None
+    scores = {lang: sum(1 for w in words if w in sw) for lang, sw in STOPWORDS.items()}
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    if ranked[0][1] == 0:              # kein einziges Funktionswort getroffen
+        return None
+    if ranked[0][1] == ranked[1][1]:   # Gleichstand -> unsicher
+        return None
+    return ranked[0][0]
+
+
+def detect_lang(text):
+    """Sprachcode oder None ('unsicher'). Schrift schlaegt Stopwoerter."""
+    return detect_script(text) or detect_latin(text)
+
+
 def translate(text, src, dst):
     """Ruft Claude auf und gibt den uebersetzten Text zurueck (raises bei Fehler)."""
     system = (
@@ -372,6 +432,14 @@ class Handler(BaseHTTPRequestHandler):
             if cached is not None:
                 print(f"[cache] {src}->{dst}: {text[:40]!r}")
                 self._send({"translation": cached, "creditsRemaining": 99999999})
+                return
+            # Vorfilter: schon Zielsprache -> immer durch; unsicher -> durch,
+            # sofern nicht TRANSLATE_WHEN_UNSURE. Beides spart den API-Call.
+            detected = detect_lang(text)
+            if detected == dst or (detected is None and not TRANSLATE_WHEN_UNSURE):
+                why = "schon-" + dst if detected == dst else "unsicher"
+                print(f"[skip:{why}] {src}->{dst}: {text[:40]!r}")
+                self._send({"translation": text, "creditsRemaining": 99999999})
                 return
             out, usage = translate(text, src, dst)
             CACHE.put(text, src, dst, out)
