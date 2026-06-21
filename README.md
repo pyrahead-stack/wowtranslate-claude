@@ -20,8 +20,6 @@ What that means in practice:
 - Incoming chat (e.g. Chinese → English) is translated for you to read. Outgoing
   translation (your text → another language) is optional and off by default.
 
-German implementation notes: [`CLAUDE_HOOK.md`](CLAUDE_HOOK.md).
-
 ## Requirements
 
 - A **WoW 1.12** client with a DLL loader that reads `dlls.txt` (vanillafixes, etc.).
@@ -40,9 +38,9 @@ The proxy needs one Anthropic API key. Beginner-friendly walkthrough:
 2. When asked **"How will you use the Claude API?"**, choose **Individual**.
 3. **Buy usage credits:** pick **$5** ("Trying it out"). Adding credit requires a billing
    address and a **credit card**.
-   - **Important: do NOT enable auto-reload** ("Automatisches Neuladen aktivieren" — leave
-     it off). With auto-reload off, your card can never be charged again, so the $5 is a
-     hard ceiling. It lasts a very long time for chat.
+   - **Important: do NOT enable auto-reload** — leave it off. With auto-reload off, your
+     card can never be charged again, so the $5 is a hard ceiling. It lasts a very long
+     time for chat.
 4. In the left sidebar open **API keys → Create key**, name it (e.g. `wowtranslate`), and
    **copy the `sk-ant-...` value** — it is shown only once.
 
