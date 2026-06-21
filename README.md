@@ -1,15 +1,25 @@
-# WoWTranslate
+# WoWTranslate → Claude
 
 <p align="center">
   <strong>Real-time chat translation for World of Warcraft 1.12</strong><br>
-  Break the language barrier on multilingual WoW 1.12 servers
+  Break the language barrier on multilingual WoW 1.12 servers — powered by your own Claude API key
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/WoW-1.12-blue" alt="WoW 1.12">
-  <img src="https://img.shields.io/badge/version-0.12-green" alt="Version 0.12">
-  <img src="https://img.shields.io/github/license/sanjaygbhat/wow-translate" alt="License">
+  <img src="https://img.shields.io/badge/backend-Claude-orange" alt="Claude backend">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
+
+---
+
+> **This is a fork.** It replaces the original paid cloud backend with a small **local proxy** that calls the
+> [Claude Messages API](https://docs.anthropic.com/en/api/messages). The in-game DLL is unchanged in behaviour —
+> it just talks to `127.0.0.1` instead of a remote server. There is **no subscription and no per-key billing**:
+> you bring your own `ANTHROPIC_API_KEY` and pay Anthropic's normal API rates (a few cents a month for chat).
+>
+> Original project: [sanjaygbhat/wow-translate](https://github.com/sanjaygbhat/wow-translate).
+> German implementation notes: [`CLAUDE_HOOK.md`](CLAUDE_HOOK.md).
 
 ---
 
@@ -17,52 +27,74 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🌍 **Multi-Language** | Chinese, Japanese, Korean, Russian → English (and reverse) |
-| 📚 **WoW Glossary** | 500+ gaming terms translated correctly ("老克" → "Kel'Thuzad", not "Old gram") |
-| ⚡ **Instant Cache** | Previously seen translations are instant and free |
+| 🌍 **Multi-Language** | Chinese, Japanese, Korean, Russian, German, … → English (and reverse) |
+| 🤖 **Your Claude key** | Runs against the Claude Messages API with your own key — no third-party service in the middle |
+| 💸 **Pay-per-use** | Only Anthropic's API cost; with `claude-haiku-4-5` that's typically cents per month |
+| ⚡ **Instant Cache** | Previously seen translations are instant and free (no API call) |
 | 💬 **Outgoing Translation** | Type in English, send in Chinese (or other languages) |
 | 🔗 **Hyperlink Safe** | Player names, items, and quests stay clickable |
 | 🗺️ **Minimap Button** | One-click access to settings, draggable around the minimap |
 | 📺 **Channel Filtering** | Choose exactly which channels get translated |
-| 💤 **AFK Auto-Pause** | Saves credits by pausing translation while you're AFK |
+| 💤 **AFK Auto-Pause** | Pauses translation while you're AFK to save API calls |
+
+---
+
+## 📋 Requirements
+
+- **WoW 1.12** client with a DLL loader that reads `dlls.txt` (vanillafixes, etc.).
+- **SuperWoW** loaded — it provides the `UnitXP` function the DLL uses to talk to the addon.
+  Verify in-game: `/run print(UnitXP and "ok" or "missing")`.
+- **An Anthropic API key** (`ANTHROPIC_API_KEY`) for the local proxy.
+- **Python 3** on the host that runs the proxy. On Linux/Wine the proxy runs on the host and
+  the WoW client reaches it over loopback automatically.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Download
+### 1. Get the DLL + Addon (built via GitHub Actions — no local compiler needed)
 
-**[⬇️ Download Latest Release](../../releases/latest)**
+1. Fork/push this repo to your own GitHub account.
+2. **Actions** tab → workflow **“Build & Package WoWTranslate”** → builds automatically on push to `main`
+   (or run it manually). It compiles with MSVC as **Win32 / 32-bit**, matching WoW 1.12.
+3. Download the artifact **`WoWTranslate-v<run-number>`** — it contains `WoWTranslate.dll` plus the
+   `Interface/` folder.
 
-The download includes everything: DLL + Addon in one package.
-
-### 2. Install
-
-Extract and copy to your WoW folder:
+### 2. Install into WoW
 
 ```
 YourWoWFolder/
 ├── WoW.exe
-├── WoWTranslate.dll        ← From the download
-├── dlls.txt                ← Add "WoWTranslate.dll" to this file
+├── WoWTranslate.dll        ← from the artifact
+├── dlls.txt                ← add the line "WoWTranslate.dll"
 └── Interface/
     └── AddOns/
-        └── WoWTranslate/   ← From the download
+        └── WoWTranslate/   ← from the artifact
 ```
 
-> **Note:** If `dlls.txt` doesn't exist, create it and add `WoWTranslate.dll` on the first line.
+> If `dlls.txt` doesn't exist, create it and put `WoWTranslate.dll` on the first line.
 
-### 3. Get API Key
+### 3. Start the proxy (on the host)
 
-API keys are distributed by the addon author. Each key comes with credits for translation.
-
-### 4. Configure In-Game
-
-```
-/wt key WT-XXXX-XXXX        Set your API key
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+python3 proxy/claude_translate_proxy.py
 ```
 
-**Done!** A minimap button (scroll icon) appears — click it to open settings. Chat messages will now appear translated.
+Listens on `127.0.0.1:8787`. Want it to start automatically with the game? See
+[Auto-start the proxy](#-auto-start-the-proxy) below.
+
+### 4. Configure in-game
+
+```
+/wt key whatever     ← any dummy value; the proxy ignores the key, but the addon
+                       wants one set
+/wt show             ← pick languages / channels
+```
+
+**Done!** A minimap button (scroll icon) appears — click it for settings. Chat now shows up translated.
+Default direction is incoming `zh→en`, outgoing `en→zh`; change it via the config
+(`WoWTranslateDB.incomingToLang` etc.) to e.g. `de`.
 
 ---
 
@@ -72,49 +104,62 @@ API keys are distributed by the addon author. Each key comes with credits for tr
 |---------|-------------|
 | `/wt show` | Open configuration panel |
 | `/wt on` / `/wt off` | Enable/disable translation |
-| `/wt key <key>` | Set your API key |
-| `/wt status` | Show status and credits |
+| `/wt key <key>` | Set the API key the addon stores (dummy is fine with this fork) |
+| `/wt status` | Show status |
 | `/wt test 你好` | Test translation |
 | `/wt outgoing on` | Enable outgoing translation |
 | `/wt clearcache` | Clear translation cache |
 
 ---
 
-## 💰 Pricing
-
-| Rate | Details |
-|------|---------|
-| **$30 / million characters** | ~0.003¢ per character |
-| **Cache hits are FREE** | Repeated messages cost nothing |
-| **Typical usage** | $1-3/month for active players |
-
-Check your balance anytime with `/wt status` or `/wt show`.
-
----
-
 ## 🔧 How It Works
 
 ```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Glossary   │ →  │    Cache    │ →  │  Translate  │
-│  (instant)  │    │   (free)    │    │  (credits)  │
-└─────────────┘    └─────────────┘    └─────────────┘
+WoW client (DLL)  ──HTTP──►  local proxy (127.0.0.1:8787)  ──HTTPS──►  Claude Messages API
+       ▲                                                                      │
+       └──────────────────── translated text ◄───────────────────────────────┘
 ```
 
-1. **Glossary** — WoW terms translated instantly (raids, bosses, slang)
-2. **Cache** — Seen before? Instant and free
-3. **API** — New text uses credits
+1. **Glossary / Cache** — WoW terms and previously seen messages resolve instantly and for free.
+2. **Proxy** — new text is POSTed to the local proxy, which ignores the dummy key, builds a prompt and
+   calls Claude.
+3. **Claude** — returns the translation; only this step uses your Anthropic credits.
 
 ---
 
-## 🎮 Language Settings
+## 🔌 Auto-start the proxy
 
-Open settings with `/wt show`:
+So you don't have to launch the proxy by hand each time. Works for any user, no hardcoded paths.
 
-- **Incoming**: What language to translate FROM (Chinese, Japanese, Korean, Russian)
-- **Outgoing**: Enable translation for Say, Party, Guild, Whisper, etc.
-- **Channel Filtering**: Toggle individual channels (Say, Yell, Whisper, Party, Guild, Raid, Battleground, World/Local) for both incoming and outgoing
-- **AFK Pause**: Translation pauses while AFK to save credits (on by default, configurable)
+**Automatic (Lutris):**
+
+```bash
+proxy/install-lutris-autostart.sh
+```
+
+Finds your WoW/OctoWoW config in `~/.config/lutris/games/` and registers `proxy/ensure-proxy.sh`
+as the `prelaunch_command` (with backup, idempotent).
+
+**Manual / universal (any distro, any launcher):**
+In Lutris: game → gear icon → **System options** → “Run a script before launch” → point it at
+`proxy/ensure-proxy.sh`.
+
+`ensure-proxy.sh` only starts the proxy if it isn't already running and exits immediately, so it
+never blocks the game launch.
+
+---
+
+## 🎛️ Configuration
+
+In `proxy/claude_translate_proxy.py`:
+
+- **`MODEL`** — default `claude-haiku-4-5` (fast + cheap, ideal for chat). Use `claude-sonnet-4-6`
+  for higher-quality translations.
+- **`LISTEN_PORT`** — must match the port the DLL uses (`serverPort`, default `8787`).
+
+What the fork changed vs. upstream — `dll/src/translator_core.cpp` (3 lines):
+`serverHost → 127.0.0.1`, `serverPort → 8787`, and `WINHTTP_FLAG_SECURE → 0` (plain HTTP instead of
+HTTPS, so no TLS cert is needed for the loopback hop).
 
 ---
 
@@ -122,17 +167,20 @@ Open settings with `/wt show`:
 
 | Problem | Solution |
 |---------|----------|
-| DLL not loading | Ensure `WoWTranslate.dll` is next to `WoW.exe` and listed in `dlls.txt` |
-| "Out of credits" | Your API key needs more credits — contact whoever provided your key |
-| No translations | Run `/wt status` to check DLL loaded, then `/wt test 你好` |
+| `UnitXP` missing | SuperWoW isn't loaded — nothing works without it. Check `/run print(UnitXP and "ok" or "missing")` |
+| DLL not loading | Ensure `WoWTranslate.dll` is next to `WoW.exe` and listed in `dlls.txt`. Test: `/run print(UnitXP("WoWTranslate","ping"))` should print `pong` |
+| No translations, proxy shows nothing | Confirm the DLL loaded (see above) and that the proxy is running on the same port |
+| Garbled characters (mojibake) | Most servers (Turtle WoW etc.) use UTF-8 and are fine. A Latin1/Western codepage server can mangle special characters |
 | Launcher issues | Run `WoW.exe` directly instead of through a launcher |
 
 ---
 
-## 🛠️ Building from Source
+## 🛠️ Building from Source (locally)
 
 <details>
 <summary>For contributors</summary>
+
+CI (GitHub Actions) is the recommended path. To build locally on Windows:
 
 **Requirements:** Windows, Visual Studio 2022, CMake 3.20+
 
@@ -150,7 +198,7 @@ Output: `dll/build/bin/Release/WoWTranslate.dll`
 
 ## 📄 License
 
-MIT License
+MIT License. Forked from [sanjaygbhat/wow-translate](https://github.com/sanjaygbhat/wow-translate).
 
 ---
 
