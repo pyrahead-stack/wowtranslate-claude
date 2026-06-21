@@ -173,9 +173,14 @@ WoW client (DLL)  --HTTP-->  local proxy (127.0.0.1:8787)  --HTTPS-->  Claude Me
 
 ## Auto-start the proxy
 
-So you don't have to launch it by hand. Works for any user, no hardcoded paths.
+Optional — so you don't have to start the proxy by hand each time. The helper scripts use
+no hardcoded paths (they locate the config dynamically), so they work regardless of your
+username or install location.
 
-**Automatic (Lutris):**
+If you launch the game with **Lutris** (common on Linux), hook the proxy into Lutris'
+pre-launch step — automatically or via the UI:
+
+**Automatic:**
 
 ```bash
 proxy/install-lutris-autostart.sh
@@ -184,10 +189,14 @@ proxy/install-lutris-autostart.sh
 Finds your WoW/OctoWoW config in `~/.config/lutris/games/` and registers
 `proxy/ensure-proxy.sh` as the `prelaunch_command` (with backup, idempotent).
 
-**Manual / universal (any distro, any launcher):**
-In Lutris: game → gear icon → **System options** → "Run a script before launch" → point
-it at `proxy/ensure-proxy.sh`. It starts the proxy only if it isn't already running and
-exits immediately, so it never blocks the game launch.
+**Manual (Lutris UI):** game → gear icon → **System options** → "Run a script before
+launch" → point it at `proxy/ensure-proxy.sh`.
+
+**Other launchers / no launcher:** run `proxy/start-proxy.sh` yourself before playing, or
+add `proxy/ensure-proxy.sh` to whatever pre-launch hook your launcher offers.
+
+`ensure-proxy.sh` starts the proxy only if it isn't already running and exits immediately,
+so it never blocks the game launch.
 
 ## Configuration
 
