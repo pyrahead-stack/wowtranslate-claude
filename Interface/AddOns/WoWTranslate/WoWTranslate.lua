@@ -940,6 +940,16 @@ local function HookedSendChatMessage(msg, chatType, language, channel)
         return originalSendChatMessage(msg, chatType, language, channel)
     end
 
+    -- Skip addon protocol traffic, not human chat. Many addons broadcast
+    -- version/handshake tokens via SendChatMessage (e.g. Atlas-TW sends
+    -- "ATW:1060:v" over a hidden channel). Translating those corrupts the
+    -- handshake and spams the channel. The "<letters>:<digits>:" shape never
+    -- occurs in natural language.
+    if string.find(msg, "^%a+:%d+:") then
+        DebugLog("Looks like addon protocol, sending original:", msg)
+        return originalSendChatMessage(msg, chatType, language, channel)
+    end
+
     -- Skip if already contains target language (don't double-translate)
     if ContainsOutgoingTargetLanguage(msg) then
         DebugLog("Message already contains target language, skipping outgoing translation")
