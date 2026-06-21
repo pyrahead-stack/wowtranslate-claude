@@ -7,6 +7,23 @@ A fork of [sanjaygbhat/wow-translate](https://github.com/sanjaygbhat/wow-transla
 original sends chat to a commercial cloud backend; this version talks to a local proxy
 and your own Anthropic key.
 
+> [!NOTE]
+> New to the terminal? Don't worry — this guide spells out every command and tells you
+> exactly what to type and what you should see. Just follow the sections in order.
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Requirements](#requirements)
+- [Get an API key](#get-an-api-key)
+- [Install](#install)
+- [Run](#run)
+- [Commands](#commands)
+- [Auto-start](#auto-start-optional)
+- [Settings](#settings-optional)
+- [Troubleshooting](#troubleshooting)
+- [Build from source](#build-from-source)
+
 ## What it does
 
 - Translates **incoming** chat into your language — **any** source language is
@@ -26,9 +43,14 @@ and your own Anthropic key.
 
 - A **WoW 1.12** client with a DLL loader that reads `dlls.txt` (e.g. vanillafixes).
 - **SuperWoW** loaded — it provides the `UnitXP` function the addon needs.
-  Check in-game: `/run print(UnitXP and "ok" or "missing")`.
-- **Python 3** to run the proxy (the same machine as the game is fine).
-- An **Anthropic API key** (next section).
+  Check in-game by typing `/run print(UnitXP and "ok" or "missing")` (it should print `ok`).
+- **Python 3** to run the proxy on the same computer you play on (no separate server
+  needed). Most Linux systems already have it — check with `python3 --version`.
+- An **Anthropic API key** (the next section walks you through getting one).
+
+> [!IMPORTANT]
+> SuperWoW is mandatory — without it the addon does nothing at all. Make sure it's
+> installed and loaded before you go further.
 
 ## Get an API key
 
@@ -49,51 +71,72 @@ prepaid with auto-reload off, you can never spend more than you loaded.
 
 Keys bill to **your** account, so you can hand a friend a key and they just run the proxy
 with it. The dependable cost cap is your prepaid balance (auto-reload off) — total spend
-across all keys can never exceed it. For a separate, revocable key per person (and
-per-person cost tracking), create a **Workspace** (Console → Settings → Workspaces) and
-create the key there. Revoke any key anytime under **API keys**.
+across all keys can never exceed it.
 
-> Note: the Console has no reliable per-key "$X then stop" cap — its workspace spend
-> limits are email alerts/throttles, not hard stops. The prepaid balance is the real limit.
+You can create several keys under **API keys → Create key** — give each one its own name
+(e.g. `friend-bob`) so you can tell them apart, and click **Revoke** next to a key to kill
+it anytime. That's enough for most people. (Only if you also want per-person *cost
+tracking* do you need a **Workspace** under Console → Settings → Workspaces.)
+
+> [!NOTE]
+> The Console has no reliable per-key "$X then stop" cap — its workspace spend limits are
+> email alerts/throttles, not hard stops. The prepaid balance is the real limit.
 
 ## Install
 
 1. Download the latest **[release ZIP](https://github.com/pyrahead-stack/wowtranslate-claude/releases/latest)**
    (or build it yourself — see the end of this file).
-2. Copy the contents into your WoW folder:
+2. Unpack it. You get a `WoWTranslate` folder with three things in it:
+
+```
+WoWTranslate/                        ← the unpacked ZIP
+├── WoWTranslate.dll
+├── Interface/AddOns/WoWTranslate/
+└── proxy/                           ← the local proxy — leave it here, don't move it
+```
+
+3. Copy **only** `WoWTranslate.dll` and the `Interface` folder into your WoW folder:
 
 ```
 YourWoWFolder/
 ├── WoW.exe
-├── WoWTranslate.dll                 ← from the ZIP
+├── WoWTranslate.dll                 ← copied from the ZIP
 ├── dlls.txt                         ← add a line: WoWTranslate.dll
-└── Interface/AddOns/WoWTranslate/   ← from the ZIP
+└── Interface/AddOns/WoWTranslate/   ← copied from the ZIP
 ```
 
 If `dlls.txt` doesn't exist, create it with `WoWTranslate.dll` on the first line.
 
+**Leave the `proxy/` folder where you unpacked it** — it does not go into the WoW folder.
+You'll start it from there in the next section.
+
 ## Run
 
-**1. Start the proxy** with your key. Quickest:
+**1. Start the proxy.** Open a terminal in the folder where you unpacked the ZIP (the one
+containing `proxy/`) — in most file managers, right-click inside it → *Open Terminal Here*.
+Then run, replacing `sk-ant-...` with your own key:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 python3 proxy/claude_translate_proxy.py
 ```
 
-Or store the key once so it stays out of your shell history:
+It's ready when it prints `... laeuft auf http://127.0.0.1:8787`. Keep this window open
+while you play.
+
+Or store the key once so you don't paste it every time (paste your key at the prompt):
 
 ```bash
 mkdir -p ~/.config/wowtranslate
-read -rs K && (umask 077; printf '%s' "$K" > ~/.config/wowtranslate/anthropic.key) && unset K
+read -rsp "Paste your key, then Enter: " K && (umask 077; printf '%s' "$K" > ~/.config/wowtranslate/anthropic.key) && unset K
 proxy/start-proxy.sh
 ```
 
 The proxy must be running while you play. To launch it together with the game, see
 [Auto-start](#auto-start-optional).
 
-**2. In-game**, type `/wt key x` once (the addon requires a key field; this fork ignores
-its value — the real key is on the proxy), then `/wt show` to pick languages and channels.
+**2. In-game**, type `/wt key x` once (any value — this fork ignores it; the real key is on
+the proxy), then `/wt show` to pick languages and channels.
 
 A minimap button appears: **left-click** opens settings, **right-click** quickly switches
 the outgoing reply language. Default is incoming Chinese → English; outgoing translation
@@ -136,11 +179,17 @@ In `proxy/claude_translate_proxy.py`:
 
 | Problem | Solution |
 |---------|----------|
+| Proxy quits with `ANTHROPIC_API_KEY ist nicht gesetzt` | It started without a key. Run the `export` line from [Step 1](#step-1--start-the-proxy) in the same terminal, or set up *Save your key once* |
+| `command not found: python3` | Python 3 isn't installed. Install it via your distro (e.g. `sudo apt install python3` on Debian/Ubuntu) |
 | `UnitXP` missing | SuperWoW isn't loaded — nothing works without it. Check `/run print(UnitXP and "ok" or "missing")` |
 | DLL not loading | Ensure `WoWTranslate.dll` is next to `WoW.exe` and listed in `dlls.txt`. Test: `/run print(UnitXP("WoWTranslate","ping"))` should print `pong` |
 | No translations, nothing in the proxy window | Confirm the DLL loaded (above) and that the proxy is running |
 | Your own messages go out garbled/empty | Outgoing translation is on and producing a script your client can't display (e.g. Chinese). Turn it off with `/wt outgoing off`, or pick a Latin-script reply language |
 | Garbled incoming characters | Most servers use UTF-8 and are fine. A server on a Western (Latin1) codepage can mangle special characters |
+
+Still stuck? Open an issue at
+[github.com/pyrahead-stack/wowtranslate-claude/issues](https://github.com/pyrahead-stack/wowtranslate-claude/issues)
+— include what you typed, what you expected, and what the proxy window printed.
 
 ## Build from source
 
