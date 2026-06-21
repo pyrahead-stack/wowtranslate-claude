@@ -125,8 +125,8 @@ class UsageStats:
 
     def summary(self):
         s = self.snapshot()
-        return (f"{s['calls']} Calls, {s['in']}+{s['out']} Tokens, ~${s['cost']:.4f}"
-                + (f" (Budget ${BUDGET:.2f}/Monat)" if BUDGET else ""))
+        return (f"{s['calls']} calls, {s['in']}+{s['out']} tokens, ~${s['cost']:.4f}"
+                + (f" (budget ${BUDGET:.2f}/month)" if BUDGET else ""))
 
 
 STATS = UsageStats(STATS_PATH)
@@ -487,12 +487,12 @@ def _call_claude(body):
             # 4xx/5xx: nur transiente Codes wiederholen, Rest sofort weiterreichen.
             if e.code not in RETRY_STATUS or i == attempts - 1:
                 raise
-            print(f"[retry] claude {e.code}, Versuch {i + 1}/{attempts}")
+            print(f"[retry] claude {e.code}, attempt {i + 1}/{attempts}")
         except urllib.error.URLError as e:
             # Netzwerkblip (DNS/Connection): wiederholen bis Versuche aus sind.
             if i == attempts - 1:
                 raise
-            print(f"[retry] netzwerk {e.reason}, Versuch {i + 1}/{attempts}")
+            print(f"[retry] network {e.reason}, attempt {i + 1}/{attempts}")
         time.sleep(RETRY_BACKOFF[i])
 
 
@@ -535,7 +535,7 @@ class Handler(BaseHTTPRequestHandler):
             # zurueck, KEIN Claude-Call (sonst antwortet das Modell konversationell).
             stripped = re.sub(r'https?://\S+', '', text)
             if not re.search(r'[^\W\d_]', stripped):
-                print(f"[skip:nichts] {text[:40]!r}")
+                print(f"[skip:nontext] {text[:40]!r}")
                 self._send({"translation": text, "creditsRemaining": credits_remaining()})
                 return
             cached = CACHE.get(text, src, dst)
@@ -551,20 +551,20 @@ class Handler(BaseHTTPRequestHandler):
             # (keep, inkl. Zielsprache), werden uebersprungen.
             twu = TRANSLATE_WHEN_UNSURE or (src == "auto")
             if (detected is not None and detected in keep) or (detected is None and not twu):
-                why = ("verstanden:" + detected) if detected else "unsicher"
+                why = ("understood:" + detected) if detected else "unsure"
                 print(f"[skip:{why}] ->{dst}: {text[:40]!r}")
                 self._send({"translation": text, "creditsRemaining": credits_remaining()})
                 return
             # Harte Budget-Grenze: ist das Monatslimit erreicht, KEIN neuer Call mehr
             # (Cache-Hits oben werden weiter bedient = Offline-Modus). Original zurueck.
             if BUDGET is not None and STATS.cost() >= BUDGET:
-                print(f"[budget] Limit erreicht, kein Call: {text[:40]!r}")
+                print(f"[budget] limit reached, no call: {text[:40]!r}")
                 self._send({"translation": text, "creditsRemaining": 0})
                 return
             out, usage = translate(text, src, dst)
             CACHE.put(text, src, dst, out)
             total = STATS.add(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            print(f"[ok] {src}->{dst}: {text[:40]!r} -> {out[:40]!r}  (~${total:.4f} Monat)")
+            print(f"[ok] {src}->{dst}: {text[:40]!r} -> {out[:40]!r}  (~${total:.4f} month)")
             self._send({"translation": out, "creditsRemaining": credits_remaining()})
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
@@ -580,16 +580,16 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     if not API_KEY:
-        raise SystemExit("ANTHROPIC_API_KEY ist nicht gesetzt (export ANTHROPIC_API_KEY=sk-ant-...)")
+        raise SystemExit("ANTHROPIC_API_KEY is not set (export ANTHROPIC_API_KEY=sk-ant-...)")
     srv = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)
-    print(f"WoWTranslate Claude-Proxy laeuft auf http://{LISTEN_HOST}:{LISTEN_PORT}  (Modell: {MODEL})")
-    print(f"Cache: {len(CACHE)} Eintraege geladen aus {CACHE_PATH}")
-    print(f"Usage bisher: {STATS.summary()}")
-    print("Strg+C zum Beenden.")
+    print(f"WoWTranslate Claude proxy running on http://{LISTEN_HOST}:{LISTEN_PORT}  (model: {MODEL})")
+    print(f"Cache: {len(CACHE)} entries loaded from {CACHE_PATH}")
+    print(f"Usage so far: {STATS.summary()}")
+    print("Press Ctrl+C to stop.")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\nbeendet.")
+        print("\nstopped.")
 
 
 if __name__ == "__main__":

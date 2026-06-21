@@ -6,10 +6,10 @@ LOG=/tmp/wtproxy.log
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 if ss -ltn 2>/dev/null | grep -q '127.0.0.1:8787'; then
-  echo "[ensure-proxy] laeuft bereits." >> "$LOG"
+  echo "[ensure-proxy] already running." >> "$LOG"
   exit 0
 fi
 
-echo "[ensure-proxy] starte Proxy $(date)" >> "$LOG"
+echo "[ensure-proxy] starting proxy $(date)" >> "$LOG"
 setsid nohup "$HERE/start-proxy.sh" >> "$LOG" 2>&1 &
 exit 0

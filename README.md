@@ -54,8 +54,7 @@ and your own Anthropic key.
 
 ## Get an API key
 
-1. Go to **[platform.claude.com](https://platform.claude.com/)** (the old
-   `console.anthropic.com` redirects here) and sign up.
+1. Go to **[platform.claude.com](https://platform.claude.com/)** and sign up.
 2. When asked **"How will you use the Claude API?"**, choose **Individual**.
 3. Buy usage credits → **$5**. Adding credit needs a billing address and a credit card.
    - **Do NOT enable auto-reload** — leave it off, so your card can't be charged again and
@@ -121,7 +120,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 python3 proxy/claude_translate_proxy.py
 ```
 
-It's ready when it prints `... laeuft auf http://127.0.0.1:8787`. Keep this window open
+It's ready when it prints `... running on http://127.0.0.1:8787`. Keep this window open
 while you play.
 
 Or store the key once so you don't paste it every time (paste your key at the prompt):
@@ -179,7 +178,7 @@ In `proxy/claude_translate_proxy.py`:
 
 | Problem | Solution |
 |---------|----------|
-| Proxy quits with `ANTHROPIC_API_KEY ist nicht gesetzt` | It started without a key. Run the `export` line from [Step 1](#step-1--start-the-proxy) in the same terminal, or set up *Save your key once* |
+| Proxy quits with `ANTHROPIC_API_KEY is not set` | It started without a key. Run the `export` line from [Run](#run) again in the same terminal, or store the key once |
 | `command not found: python3` | Python 3 isn't installed. Install it via your distro (e.g. `sudo apt install python3` on Debian/Ubuntu) |
 | `UnitXP` missing | SuperWoW isn't loaded — nothing works without it. Check `/run print(UnitXP and "ok" or "missing")` |
 | DLL not loading | Ensure `WoWTranslate.dll` is next to `WoW.exe` and listed in `dlls.txt`. Test: `/run print(UnitXP("WoWTranslate","ping"))` should print `pong` |
