@@ -76,6 +76,14 @@ sich sofort (blockiert den Spielstart nicht).
 - **Retry:** bei Overload/Rate-Limit/Netzwerkblip (429/500/503/529) wiederholt der
   Proxy automatisch (2×, Backoff 1s→2s). Echte Fehler (z. B. 400/401) werden
   sofort weitergereicht.
+- **Usage-/Kosten-Log:** `proxy/usage-stats.json` zählt Calls + Tokens persistent
+  mit; pro Übersetzung zeigt der Proxy die laufende Kostenschätzung (`~$… gesamt`).
+  Preise je 1M Tokens: Haiku 4.5 = $1/$5, Sonnet 4.6 = $3/$15. Nur echte
+  API-Calls zählen, Cache-Hits sind gratis. Datei löschen = Zähler zurücksetzen.
+
+> **Kein Prompt-Caching:** bewusst weggelassen — Anthropic cached erst ab ~4096
+> Token Prefix (Haiku), unser System-Prompt ist ~100 Token. `cache_control` würde
+> hier nichts bringen.
 
 ## Bekannte Stolpersteine
 - **`UnitXP` fehlt** → SuperWoW nicht geladen. Ohne das geht gar nichts.

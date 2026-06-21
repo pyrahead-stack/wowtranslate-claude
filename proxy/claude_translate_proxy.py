@@ -35,6 +35,55 @@ API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 RETRY_STATUS = {429, 500, 503, 529}
 RETRY_BACKOFF = [1, 2]  # Sekunden vor Versuch 2 und 3 (0 Wartezeit beim 1.)
 
+# Anthropic-Preise in USD je 1 Mio. Tokens (Input/Output). Stand 2026-06.
+# Quelle: claude-api Modell-Tabelle. Bei unbekanntem Modell -> Haiku-Preis.
+PRICING = {
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-opus-4-8": (5.00, 25.00),
+}
+
+STATS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage-stats.json")
+
+
+class UsageStats:
+    """Zaehlt API-Calls/Tokens persistent mit und schaetzt die Kosten.
+    Nur echte Claude-Calls landen hier — Cache-Hits kosten nichts."""
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.data = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                self.data.update(json.load(f))
+        except (FileNotFoundError, ValueError):
+            pass
+
+    def add(self, input_tokens, output_tokens):
+        with self.lock:
+            self.data["calls"] += 1
+            self.data["input_tokens"] += input_tokens
+            self.data["output_tokens"] += output_tokens
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.data, f)
+            os.replace(tmp, self.path)
+            return self.cost()
+
+    def cost(self):
+        pin, pout = PRICING.get(MODEL, PRICING["claude-haiku-4-5"])
+        return (self.data["input_tokens"] * pin
+                + self.data["output_tokens"] * pout) / 1_000_000
+
+    def summary(self):
+        return (f"{self.data['calls']} Calls, "
+                f"{self.data['input_tokens']}+{self.data['output_tokens']} Tokens, "
+                f"~${self.cost():.4f}")
+
+
+STATS = UsageStats(STATS_PATH)
+
 # Cache-Datei liegt neben diesem Skript, damit sie unabhaengig vom CWD ist.
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "translation-cache.json")
 
@@ -154,9 +203,10 @@ def translate(text, src, dst):
     }).encode("utf-8")
 
     data = _call_claude(body)
-    # Messages-API: {"content":[{"type":"text","text":"..."}], ...}
+    # Messages-API: {"content":[{"type":"text","text":"..."}], "usage":{...}}
     parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
-    return "".join(parts).strip()
+    usage = data.get("usage", {})
+    return "".join(parts).strip(), usage
 
 
 def _call_claude(body):
@@ -215,9 +265,10 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[cache] {src}->{dst}: {text[:40]!r}")
                 self._send({"translation": cached, "creditsRemaining": 99999999})
                 return
-            out = translate(text, src, dst)
+            out, usage = translate(text, src, dst)
             CACHE.put(text, src, dst, out)
-            print(f"[ok] {src}->{dst}: {text[:40]!r} -> {out[:40]!r}")
+            total = STATS.add(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            print(f"[ok] {src}->{dst}: {text[:40]!r} -> {out[:40]!r}  (~${total:.4f} gesamt)")
             # creditsRemaining gross genug, damit das Addon nie "out of credits" meldet
             self._send({"translation": out, "creditsRemaining": 99999999})
         except urllib.error.HTTPError as e:
@@ -238,6 +289,7 @@ def main():
     srv = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), Handler)
     print(f"WoWTranslate Claude-Proxy laeuft auf http://{LISTEN_HOST}:{LISTEN_PORT}  (Modell: {MODEL})")
     print(f"Cache: {len(CACHE)} Eintraege geladen aus {CACHE_PATH}")
+    print(f"Usage bisher: {STATS.summary()}")
     print("Strg+C zum Beenden.")
     try:
         srv.serve_forever()

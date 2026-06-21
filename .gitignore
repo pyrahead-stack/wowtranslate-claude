@@ -32,9 +32,11 @@ release/
 # WoW SavedVariables (for testing)
 WTF/
 
-# Proxy translation cache (local, per-user)
+# Proxy translation cache + usage stats (local, per-user)
 proxy/translation-cache.json
 proxy/translation-cache.json.tmp
+proxy/usage-stats.json
+proxy/usage-stats.json.tmp
 
 # Python
 __pycache__/
